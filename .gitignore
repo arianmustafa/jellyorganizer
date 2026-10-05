@@ -1,0 +1,17 @@
+.venv/
+.wheeltest/
+.wheeltest2/
+.wheeltest3/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+release-validation/
+matching-report.json
+storage-report.json
+.env
+.env.*
+*.token
+*.password

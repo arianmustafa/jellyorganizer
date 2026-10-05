@@ -1,0 +1,57 @@
+# Jellyorganize configuration, schema version 1.
+# Paths must be absolute or start with ~. Credentials do not belong in TOML.
+schema_version = 1
+
+[incoming]
+path = "~/media/Incoming"
+minimum_age_seconds = 60
+# stable: observe unchanged files (`organize` waits once; `run` never waits);
+# marker: use `ready PATH`;
+# handoff: your downloader atomically places only completed files in Incoming.
+completion = "stable"
+stability_seconds = 60
+ignored_extensions = [".part", ".partial", ".tmp", ".crdownload"]
+
+[movies]
+library = "~/media/Movies"
+
+[tv]
+library = "~/media/TV Shows"
+
+[matching]
+auto_apply_threshold = 0.97
+# Unique exact movie title/year plus matching TMDb details, one provider.
+confirm_exact_movies = true
+
+[naming]
+include_tmdb_id = true
+include_episode_title = true
+
+[scanning]
+ignored_tv_directories = ["Featurettes"]
+
+[providers]
+tvmaze = true
+
+[filesystem]
+hash_algorithm = "sha256"
+
+[service]
+interval_seconds = 300
+# Optional private plaintext token file for scheduled jobs; chmod 600.
+# TMDB_API_TOKEN in the environment takes precedence.
+credential_file = "~/.local/share/jellyorganize/tmdb.token"
+
+# Optional qBittorrent/Qui handoff. Both paths and the API URL are configurable.
+# Keep this disabled by leaving downloads.path and qbittorrent.url unset.
+# Handoffs require a shared incoming.path and retain stopped torrent entries.
+# [downloads]
+# path = "~/downloads/qbittorrent"
+#
+# [qbittorrent]
+# url = "http://127.0.0.1:8080"
+# username = "your-qbittorrent-user"
+# password_file = "~/.local/share/jellyorganize/qbittorrent.password"
+# Optional reverse-proxy HTTP Basic authentication, separate from WebUI login:
+# basic_username = "your-proxy-user"
+# basic_password_file = "~/.local/share/jellyorganize/qbittorrent-basic.password"

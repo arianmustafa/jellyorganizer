@@ -1,0 +1,5 @@
+include LICENSE README.md CHANGELOG.md RELEASE.md config.example.toml
+recursive-include scripts *.py
+recursive-include tests *.py
+recursive-include .github/workflows *.yml
+global-exclude *.py[cod]

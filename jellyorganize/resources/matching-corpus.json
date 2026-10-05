@@ -1,0 +1,816 @@
+{
+  "version": 1,
+  "name": "release-filenames-v1",
+  "provenance": "Curated release-format examples from project regressions; frozen metadata fixtures, not an estimate of population accuracy.",
+  "snapshots": {
+    "dune": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "438631",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 2021
+        }
+      ],
+      "details": {
+        "438631": {
+          "provider": "tmdb",
+          "provider_id": "438631",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 2021
+        }
+      }
+    },
+    "arrival": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "329865",
+          "kind": "movie",
+          "title": "Arrival",
+          "year": 2016
+        },
+        {
+          "provider": "tmdb",
+          "provider_id": "472349",
+          "kind": "movie",
+          "title": "Arrival",
+          "year": 2016
+        }
+      ],
+      "details": {
+        "329865": {
+          "provider": "tmdb",
+          "provider_id": "329865",
+          "kind": "movie",
+          "title": "Arrival",
+          "year": 2016
+        }
+      }
+    },
+    "we-live": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "1100099",
+          "kind": "movie",
+          "title": "We Live in Time",
+          "year": 2024
+        }
+      ],
+      "details": {
+        "1100099": {
+          "provider": "tmdb",
+          "provider_id": "1100099",
+          "kind": "movie",
+          "title": "We Live in Time",
+          "year": 2024
+        }
+      }
+    },
+    "ambiguous": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "438631",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 2021
+        },
+        {
+          "provider": "tmdb",
+          "provider_id": "999",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 2021
+        }
+      ],
+      "details": {
+        "438631": {
+          "provider": "tmdb",
+          "provider_id": "438631",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 2021
+        }
+      }
+    },
+    "details-mismatch": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "438631",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 1984
+        }
+      ],
+      "details": {
+        "438631": {
+          "provider": "tmdb",
+          "provider_id": "438631",
+          "kind": "movie",
+          "title": "Dune",
+          "year": 1984
+        }
+      }
+    },
+    "bear": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "136315",
+          "kind": "tv",
+          "title": "The Bear",
+          "year": 2022
+        }
+      ],
+      "details": {
+        "136315": {
+          "provider": "tmdb",
+          "provider_id": "136315",
+          "kind": "tv",
+          "title": "The Bear",
+          "year": 2022
+        }
+      },
+      "episodes": {
+        "2": {
+          "3": "Sundae"
+        }
+      },
+      "external_ids": [
+        "tt14452776",
+        403294
+      ],
+      "tvmaze": [
+        {
+          "provider": "tvmaze",
+          "provider_id": "20",
+          "kind": "tv",
+          "title": "The Bear",
+          "year": 2022,
+          "imdb_id": "tt14452776",
+          "tvdb_id": 403294
+        }
+      ],
+      "maze_episodes": [
+        [
+          2,
+          3,
+          "Sundae"
+        ]
+      ]
+    },
+    "community": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "18347",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      ],
+      "details": {
+        "18347": {
+          "provider": "tmdb",
+          "provider_id": "18347",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      },
+      "episodes": {
+        "1": {
+          "1": "Pilot"
+        }
+      },
+      "external_ids": [
+        "tt1439629",
+        94571
+      ],
+      "tvmaze": [
+        {
+          "provider": "tvmaze",
+          "provider_id": "318",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009,
+          "imdb_id": "tt1439629",
+          "tvdb_id": 94571
+        }
+      ],
+      "maze_episodes": [
+        [
+          1,
+          1,
+          "Pilot"
+        ]
+      ]
+    },
+    "robot": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "62560",
+          "kind": "tv",
+          "title": "Mr. Robot",
+          "year": 2015
+        }
+      ],
+      "details": {
+        "62560": {
+          "provider": "tmdb",
+          "provider_id": "62560",
+          "kind": "tv",
+          "title": "Mr. Robot",
+          "year": 2015
+        }
+      },
+      "episodes": {
+        "2": {
+          "1": "eps2.0_unm4sk-pt1.tc",
+          "2": "eps2.0_unm4sk-pt2.tc"
+        }
+      },
+      "external_ids": [
+        "tt4158110",
+        289590
+      ],
+      "tvmaze": [
+        {
+          "provider": "tvmaze",
+          "provider_id": "1871",
+          "kind": "tv",
+          "title": "Mr. Robot",
+          "year": 2015,
+          "imdb_id": "tt4158110",
+          "tvdb_id": 289590
+        }
+      ],
+      "maze_episodes": [
+        [
+          2,
+          1,
+          "eps2.0_unm4sk-pt1.tc"
+        ],
+        [
+          2,
+          2,
+          "eps2.0_unm4sk-pt2.tc"
+        ]
+      ]
+    },
+    "no-ids": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "18347",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      ],
+      "details": {
+        "18347": {
+          "provider": "tmdb",
+          "provider_id": "18347",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      },
+      "episodes": {
+        "1": {
+          "1": "Pilot"
+        }
+      },
+      "tvmaze": [
+        {
+          "provider": "tvmaze",
+          "provider_id": "318",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      ],
+      "maze_episodes": [
+        [
+          1,
+          1,
+          "Pilot"
+        ]
+      ]
+    },
+    "conflicting-ids": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "18347",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      ],
+      "details": {
+        "18347": {
+          "provider": "tmdb",
+          "provider_id": "18347",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009
+        }
+      },
+      "episodes": {
+        "1": {
+          "1": "Pilot"
+        }
+      },
+      "external_ids": [
+        "tt1439629",
+        94571
+      ],
+      "tvmaze": [
+        {
+          "provider": "tvmaze",
+          "provider_id": "318",
+          "kind": "tv",
+          "title": "Community",
+          "year": 2009,
+          "imdb_id": "tt9999999",
+          "tvdb_id": 94571
+        }
+      ],
+      "maze_episodes": [
+        [
+          1,
+          1,
+          "Pilot"
+        ]
+      ]
+    },
+    "parks": {
+      "tmdb": [
+        {
+          "provider": "tmdb",
+          "provider_id": "8592",
+          "kind": "tv",
+          "title": "Parks and Recreation",
+          "year": 2009
+        }
+      ],
+      "details": {
+        "8592": {
+          "provider": "tmdb",
+          "provider_id": "8592",
+          "kind": "tv",
+          "title": "Parks and Recreation",
+          "year": 2009
+        }
+      },
+      "external_ids": [
+        "tt1266020",
+        84912
+      ],
+      "episodes": {
+        "6": {
+          "3": "Doppelgängers",
+          "4": "Gin It Up!"
+        }
+      },
+      "tvmaze": [
+        {
+          "provider": "tvmaze",
+          "provider_id": "174",
+          "kind": "tv",
+          "title": "Parks and Recreation",
+          "year": 2009,
+          "imdb_id": "tt1266020",
+          "tvdb_id": 84912
+        }
+      ],
+      "maze_episodes": [
+        [
+          6,
+          4,
+          "Doppelgängers"
+        ],
+        [
+          6,
+          5,
+          "Gin It Up!"
+        ]
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "dune-release-0",
+      "filename": "Dune.2021.1080p.BluRay.x265-GROUP.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": {
+        "tmdb_id": "438631"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "dune-release-1",
+      "filename": "Dune (2021)/Dune (2021).mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": {
+        "tmdb_id": "438631"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "dune-release-2",
+      "filename": "Dune.2021.2160p.WEB-DL.DDP5.1.H.265.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": {
+        "tmdb_id": "438631"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "dune-release-3",
+      "filename": "Dune (2021) [tmdbid-438631]/Dune.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": {
+        "tmdb_id": "438631"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "dune-no-year",
+      "filename": "Dune.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": {
+        "tmdb_id": "438631"
+      },
+      "should_auto": false
+    },
+    {
+      "name": "dune-wrong-year",
+      "filename": "Dune.2020.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "dune-folder-conflict",
+      "filename": "Different Title (2021)/Dune.2021.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "arrival-release-0",
+      "filename": "Arrival.2016.1080p.BluRay.x265-GROUP.mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": {
+        "tmdb_id": "329865"
+      },
+      "should_auto": false,
+      "live": true
+    },
+    {
+      "name": "arrival-release-1",
+      "filename": "Arrival (2016)/Arrival (2016).mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": {
+        "tmdb_id": "329865"
+      },
+      "should_auto": false,
+      "live": true
+    },
+    {
+      "name": "arrival-release-2",
+      "filename": "Arrival.2016.2160p.WEB-DL.DDP5.1.H.265.mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": {
+        "tmdb_id": "329865"
+      },
+      "should_auto": false,
+      "live": true
+    },
+    {
+      "name": "arrival-release-3",
+      "filename": "Arrival (2016) [tmdbid-329865]/Arrival.mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": {
+        "tmdb_id": "329865"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "arrival-no-year",
+      "filename": "Arrival.mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": {
+        "tmdb_id": "329865"
+      },
+      "should_auto": false
+    },
+    {
+      "name": "arrival-wrong-year",
+      "filename": "Arrival.2015.mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "arrival-folder-conflict",
+      "filename": "Different Title (2016)/Arrival.2016.mkv",
+      "kind": "movie",
+      "snapshot": "arrival",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "we-live-release-0",
+      "filename": "We.Live.in.Time.2024.1080p.BluRay.x265-GROUP.mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": {
+        "tmdb_id": "1100099"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "we-live-release-1",
+      "filename": "We Live in Time (2024)/We Live in Time (2024).mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": {
+        "tmdb_id": "1100099"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "we-live-release-2",
+      "filename": "We Live in Time.2024.2160p.WEB-DL.DDP5.1.H.265.mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": {
+        "tmdb_id": "1100099"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "we-live-release-3",
+      "filename": "We Live in Time (2024) [tmdbid-1100099]/We Live in Time.mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": {
+        "tmdb_id": "1100099"
+      },
+      "should_auto": true,
+      "live": false
+    },
+    {
+      "name": "we-live-no-year",
+      "filename": "We Live in Time.mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": {
+        "tmdb_id": "1100099"
+      },
+      "should_auto": false
+    },
+    {
+      "name": "we-live-wrong-year",
+      "filename": "We Live in Time.2023.mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "we-live-folder-conflict",
+      "filename": "Different Title (2024)/We Live in Time.2024.mkv",
+      "kind": "movie",
+      "snapshot": "we-live",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "same-title-year-two-identities",
+      "filename": "Dune.2021.mkv",
+      "kind": "movie",
+      "snapshot": "ambiguous",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "search-details-disagreement",
+      "filename": "Dune.2021.mkv",
+      "kind": "movie",
+      "snapshot": "details-mismatch",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "wrong-remake",
+      "filename": "Dune.1984.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "fuzzy-movie-title",
+      "filename": "Dun.2021.mkv",
+      "kind": "movie",
+      "snapshot": "dune",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "ambiguous-shared-dump",
+      "filename": "random.download.mkv",
+      "kind": "auto",
+      "snapshot": "dune",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "bear-year",
+      "filename": "The Bear (2022)/The.Bear.S02E03.mkv",
+      "kind": "tv",
+      "snapshot": "bear",
+      "expected": {
+        "tmdb_id": "136315",
+        "season": 2,
+        "episodes": [
+          3
+        ]
+      },
+      "should_auto": true
+    },
+    {
+      "name": "bear-episode-title",
+      "filename": "The Bear - S02E03 - Sundae.mkv",
+      "kind": "tv",
+      "snapshot": "bear",
+      "expected": {
+        "tmdb_id": "136315",
+        "season": 2,
+        "episodes": [
+          3
+        ]
+      },
+      "should_auto": true
+    },
+    {
+      "name": "community-yearless-ids",
+      "filename": "Community.S01E01.REPACK.1080p.Bluray.x265-HiQVE.mkv",
+      "kind": "tv",
+      "snapshot": "community",
+      "expected": {
+        "tmdb_id": "18347",
+        "season": 1,
+        "episodes": [
+          1
+        ]
+      },
+      "should_auto": true
+    },
+    {
+      "name": "robot-combined",
+      "filename": "Mr Robot (2015)/Mr.Robot.S02E01-E02.1080p.BluRay.x265.mkv",
+      "kind": "tv",
+      "snapshot": "robot",
+      "expected": {
+        "tmdb_id": "62560",
+        "season": 2,
+        "episodes": [
+          1,
+          2
+        ]
+      },
+      "should_auto": true
+    },
+    {
+      "name": "robot-range-missing-episode",
+      "filename": "Mr Robot (2015)/Mr.Robot.S02E01-E03.mkv",
+      "kind": "tv",
+      "snapshot": "robot",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "tv-missing-number",
+      "filename": "Community.Pilot.mkv",
+      "kind": "tv",
+      "snapshot": "community",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "tv-missing-episode",
+      "filename": "Community.S01E99.mkv",
+      "kind": "tv",
+      "snapshot": "community",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "tv-wrong-local-title",
+      "filename": "The Bear (2022)/The Bear - S02E03 - A Different Episode.mkv",
+      "kind": "tv",
+      "snapshot": "bear",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "tv-folder-season-conflict",
+      "filename": "The Bear (2022)/Season 1/The.Bear.S02E03.mkv",
+      "kind": "tv",
+      "snapshot": "bear",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "yearless-no-ids",
+      "filename": "Community.S01E01.mkv",
+      "kind": "tv",
+      "snapshot": "no-ids",
+      "expected": {
+        "tmdb_id": "18347",
+        "season": 1,
+        "episodes": [
+          1
+        ]
+      },
+      "should_auto": false
+    },
+    {
+      "name": "contradictory-series-ids",
+      "filename": "Community.S01E01.mkv",
+      "kind": "tv",
+      "snapshot": "conflicting-ids",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "parks-release-number-offset",
+      "filename": "Parks and Recreation (2009)/Parks and Recreation - S06E04 - Doppelgängers.mkv",
+      "kind": "tv",
+      "snapshot": "parks",
+      "expected": {
+        "tmdb_id": "8592",
+        "season": 6,
+        "episodes": [
+          3
+        ]
+      },
+      "should_auto": true
+    },
+    {
+      "name": "parks-title-needed",
+      "filename": "Parks and Recreation (2009)/Parks.and.Recreation.S06E04.mkv",
+      "kind": "tv",
+      "snapshot": "parks",
+      "expected": null,
+      "should_auto": false
+    },
+    {
+      "name": "parks-last-local-number",
+      "filename": "Parks and Recreation (2009)/Parks and Recreation - S06E05 - Gin It Up!.mkv",
+      "kind": "tv",
+      "snapshot": "parks",
+      "expected": {
+        "tmdb_id": "8592",
+        "season": 6,
+        "episodes": [
+          4
+        ]
+      },
+      "should_auto": true
+    }
+  ]
+}

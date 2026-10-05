@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jellyorganize"
+version = "1.0.0"
+description = "Automatic Incoming organization and reversible media moves for Jellyfin"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = ["guessit>=3.8,<5", "httpx>=0.27,<1", "pydantic>=2.9,<3", "platformdirs>=4,<6"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+jellyorganize = "jellyorganize.cli:main"
+
+[project.urls]
+Repository = "https://github.com/arianmustafa/jellyorganizer"
+Issues = "https://github.com/arianmustafa/jellyorganizer/issues"
+
+[tool.setuptools.packages.find]
+include = ["jellyorganize*"]
+
+[tool.setuptools.package-data]
+"jellyorganize.resources" = ["*.toml", "*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
