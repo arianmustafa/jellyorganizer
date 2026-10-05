@@ -6,8 +6,8 @@ Version **1.0.0** targets Linux with Python 3.13 or newer. Validation uses synth
 
 | Check | Result |
 | --- | --- |
-| Local Python 3.13 suite | 270 tests passed. |
-| Local Python 3.14.3 suite | 270 tests passed. |
+| Local Python 3.13 suite | 273 tests passed, including release tag and artifact checks. |
+| Local Python 3.14.3 suite | 273 tests passed, including release tag and artifact checks. |
 | Media-host wheel suite | 270 tests passed against the 1.0 wheel, including physical cross-filesystem download handoff checks. |
 | Frozen matching corpus | 40 cases; 15 automatic matches; zero wrong, unexpected, or missed expected automatic matches. |
 | Live matching | 18 labeled cases; 15 automatic matches; three deliberately unresolved ambiguous Arrival releases; zero wrong, unexpected, or missed expected automatic matches. |
