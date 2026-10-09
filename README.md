@@ -1,4 +1,14 @@
+<p align="center">
+  <img src="docs/assets/jellyorganize-logo.png" width="200" alt="Jellyorganize logo: a violet jellyfish with a play button and teal media spines">
+</p>
+
 # Jellyorganize
+
+[![CI](https://github.com/arianmustafa/jellyorganizer/actions/workflows/release.yml/badge.svg)](https://github.com/arianmustafa/jellyorganizer/actions/workflows/release.yml)
+[![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-7c3aed)](https://github.com/arianmustafa/jellyorganizer/releases)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#install-and-configure)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
 Automatically organize completed movies and TV episodes from Incoming into Jellyfin libraries. Run `jellyorganize organize`, or schedule `jellyorganize run`; strong matches move immediately. Uncertain files stay in Incoming while other files proceed. No routine audit, review, or apply step is required. Existing Movies and TV libraries are repaired only through an explicit `audit` command.
 
