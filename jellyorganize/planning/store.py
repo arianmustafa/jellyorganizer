@@ -38,6 +38,7 @@ class PlanEntry(BaseModel):
     confidence: float
     candidate: Candidate | None = None
     alternatives: list[Candidate] = Field(default_factory=list)
+    matching: dict = Field(default_factory=dict)
     destination: Path | None = None
     source_states: list[SourceState] = Field(default_factory=list)
     files: list[FileState] = Field(default_factory=list)
@@ -110,7 +111,7 @@ def entry_from_proposal(proposal: Proposal, config: Config) -> PlanEntry:
             source_states = []
     return PlanEntry(source=item.path, kind=item.kind, source_root=item.root, destination_root=target_root,
                      status=status, reason=reason, confidence=proposal.confidence,
-                     candidate=proposal.candidate, alternatives=proposal.alternatives,
+                     candidate=proposal.candidate, alternatives=proposal.alternatives, matching=proposal.matching,
                      destination=proposal.destination, source_states=source_states, files=files)
 
 

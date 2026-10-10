@@ -24,6 +24,9 @@ def destinations(item: MediaItem, candidate: Candidate, config: Config, episode_
     if item.kind == "movie":
         parent = config.movies.library / folder
         stem = title + year
+        if config.naming.movie_versions:
+            from jellyorganize.naming.movie_versions import label_for
+            stem = folder + " - " + label_for(item)
     else:
         season = item.hints.get("season", item.hints.get("folder_season"))
         episodes = canonical_episodes if canonical_episodes is not None else item.hints.get("episode") or []

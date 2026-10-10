@@ -78,11 +78,11 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
             entry = entry_from_proposal(proposal, config)
             owned = {file.destination for file in entry.files if links.owned(file, entry.source_root, entry.destination_root)}
         paths = [proposal.destination, *proposal.sidecar_destinations.values()]
-        release_key = (proposal.destination.parent if proposal.item.kind == "movie"
+        from jellyorganize.naming.movie_versions import movie_conflict, release_key as movie_release_key
+        release_key = (movie_release_key(proposal.destination) if proposal.item.kind == "movie"
                        else (proposal.destination.parent, " - ".join(proposal.destination.stem.split(" - ")[:2])))
         if proposal.item.kind == "movie":
-            duplicate = proposal.destination.parent.is_dir() and any(
-                path.suffix.lower() in MEDIA_EXTENSIONS for path in proposal.destination.parent.iterdir() if path.is_file())
+            duplicate = movie_conflict(proposal.destination, proposal.item.path, owned)
         else:
             prefix = release_key[1]
             duplicate = proposal.destination.parent.is_dir() and any(
@@ -131,4 +131,7 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
         ):
             proposal.status = "CONFLICT"
             proposal.reason = "another source file covers the same TV episode"
+    from jellyorganize.metadata.explanation import explain
+    for proposal in proposals:
+        proposal.matching = explain(proposal)
     return proposals

@@ -58,6 +58,8 @@ def parser() -> argparse.ArgumentParser:
     ready = commands.add_parser("ready", help="acknowledge a completed file or download folder in Incoming")
     ready.add_argument("path", type=Path)
     commands.add_parser("recover", help="resume interrupted transactions using saved decisions")
+    doctor = commands.add_parser("doctor", help="check root access and actual hard-link support using temporary probes")
+    doctor.add_argument("--json", action="store_true")
     for command in ("status", "exceptions"):
         display = commands.add_parser(command, help="show unattended run health" if command == "status" else "show unresolved files without repeated reports")
         display.add_argument("--json", action="store_true")
@@ -65,12 +67,12 @@ def parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--corpus", type=Path, help="custom labeled corpus JSON")
     benchmark.add_argument("--live", action="store_true", help="use live providers instead of frozen snapshots")
     benchmark.add_argument("--output", type=Path, help="save the full machine-readable report")
-    download = commands.add_parser("import-download", help="move or hard-link a completed, stopped torrent into Incoming and organize it")
+    download = commands.add_parser("import-download", help="import a completed torrent; hard-link mode allows continued seeding")
     download.add_argument("--torrent", required=True, help="qBittorrent info hash (Qui: {hash})")
-    download.add_argument("--dry-run", action="store_true", help="verify client and files and save a handoff plan without moving")
-    download.add_argument("--handoff-only", action="store_true", help="move to Incoming without metadata organization")
+    download.add_argument("--dry-run", action="store_true", help="verify client and files and save a handoff plan without changing media")
+    download.add_argument("--handoff-only", action="store_true", help="import into Incoming without metadata organization")
     credentials = commands.add_parser("credentials", help="save a private credential for manual runs and download hooks")
-    credentials.add_argument("provider", choices=["tmdb", "qbittorrent", "qbittorrent-proxy"])
+    credentials.add_argument("provider", choices=["tmdb", "qbittorrent", "qbittorrent-proxy", "jellyfin", "webhook"])
     credentials.add_argument("--from-env", action="store_true", help="save the provider's current environment credential without prompting")
     ingest = commands.add_parser("ingest", help="save a dry-run plan; --auto applies only strong matches")
     ingest.add_argument("kind", choices=["movies", "tv", "all"])
@@ -80,6 +82,11 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("--auto", action="store_true", help="apply only high-confidence CONFIRMED repairs")
     review = commands.add_parser("review", help="show attention items and record choices in a new plan")
     review.add_argument("plan_id")
+    explanation = commands.add_parser("explain", help="show the matching evidence saved in a plan")
+    explanation.add_argument("plan_id")
+    explanation.add_argument("--json", action="store_true")
+    integrations = commands.add_parser("integrations", help="retry pending webhooks and Jellyfin refreshes")
+    integrations.add_argument("--json", action="store_true")
     identify = commands.add_parser("identify", help="persist a manually verified TMDb identity")
     identify.add_argument("path", type=Path)
     identify.add_argument("--tmdb", required=True, type=int)
@@ -144,6 +151,10 @@ def show_plan(plan, verbose: int, *, auto: bool = False) -> int:
         label = "UNKNOWN" if entry.reason.startswith("media type is ambiguous") else entry.kind.upper()
         print(f"[{entry.status}] {label} {entry.source}")
         print(f"  {entry.reason}")
+        if verbose or entry.status == "REVIEW":
+            from jellyorganize.metadata.explanation import lines
+            for line in lines(entry.matching):
+                print(f"  {line}")
         if entry.candidate:
             print(f"  TMDb: {entry.candidate.title} ({entry.candidate.year or '?'}) [tmdbid-{entry.candidate.provider_id}]")
             print(f"  Confidence: {entry.confidence:.2f}")
@@ -238,22 +249,37 @@ async def make_plan(config: Config, workflow: str, selection: str, verbose: int,
         if not quiet:
             print("Auto: no eligible items; media unchanged")
         status = 1 if any(entry.status == "ERROR" for entry in saved.entries) else plan_status
-        if workflow == "ingest":
-            summary = Operations(config.state_dir / "operations.sqlite3").record(
-                saved, status, recovered_items=recovery_counts["RECOVERED"])
-            if quiet:
-                print(json.dumps(summary, sort_keys=True))
+        summary = await finish_run(config, saved, status, recovered_items=recovery_counts["RECOVERED"])
+        if quiet:
+            print(json.dumps(summary, sort_keys=True))
         return status
     transaction, counts = apply_plan(saved, config, config.state_dir / "transactions", auto_threshold=threshold)
     if not quiet:
         show_transaction(transaction, counts)
     status = apply_status(saved, counts)
-    if workflow == "ingest":
-        summary = Operations(config.state_dir / "operations.sqlite3").record(
-            saved, status, counts, transaction, recovered_items=recovery_counts["RECOVERED"])
-        if quiet:
-            print(json.dumps(summary, sort_keys=True))
+    summary = await finish_run(config, saved, status, counts, transaction, recovered_items=recovery_counts["RECOVERED"])
+    if quiet:
+        print(json.dumps(summary, sort_keys=True))
     return status
+
+
+async def deliver_integrations(config):
+    if not (config.notifications.enabled or config.jellyfin.enabled):
+        return None
+    from jellyorganize.integrations import flush
+    result = await flush(config)
+    for error in result["errors"]:
+        print(f"Integration pending retry: {error}", file=sys.stderr)
+    return result
+
+
+async def finish_run(config, plan, status, counts=None, transaction=None, *, recovered_items=0):
+    summary = Operations(config.state_dir / "operations.sqlite3").record(
+        plan, status, counts, transaction, recovered_items=recovered_items, config=config)
+    result = await deliver_integrations(config)
+    if result is not None:
+        summary["integrations"] = result
+    return summary
 
 
 def show_transaction(transaction, counts: dict[str, int]) -> None:
@@ -320,6 +346,9 @@ async def review(config: Config, plan_id: str) -> int:
     skip_once: set[Path] = set()
     for entry in attention:
         print(f"[{entry.status}] {entry.source}\n  {entry.reason}")
+        from jellyorganize.metadata.explanation import lines
+        for line in lines(entry.matching):
+            print(f"  {line}")
         if entry.reason.startswith("media type is ambiguous"):
             print("  Add a movie year or TV season and episode number to the source name, then run ingest all again.")
             continue
@@ -385,6 +414,18 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, ValidationError) as error:
         print(f"Configuration error: {error}", file=sys.stderr)
         return 4
+    if args.command == "doctor":
+        from jellyorganize.filesystem.doctor import check
+        report = check(config)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"Filesystem mode: {report['mode']}")
+            for row in report["checks"]:
+                print(f"[{row['status']}] {row['stage']}: {row['source']} → {row['destination']}")
+                print("  " + (row.get("error") or ("Hard links supported" if row["link_supported"] else
+                                                    "Writable destination; move mode will use verified copying")))
+        return 0 if report["passed"] else 4
     if args.command == "config":
         if args.action == "show":
             print(json.dumps(config.model_dump(mode="json"), indent=2))
@@ -408,6 +449,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Configuration: {(args.config or config_path()).expanduser().absolute()}")
         print(f"Import transfer mode: {config.filesystem.mode}" + (" (originals retained)" if config.filesystem.mode == "hardlink" else ""))
         print(f"TMDb credential available: {'yes' if configured_token else 'no (cached lookups only)'}")
+        if config.notifications.enabled or config.jellyfin.enabled:
+            from jellyorganize.integrations import secret, webhook_url
+            for enabled, label, read in (
+                (config.notifications.enabled, "Webhook", lambda: webhook_url(config)),
+                (config.jellyfin.enabled, "Jellyfin", lambda: secret(config.jellyfin.api_key_file, "JELLYFIN_API_KEY")),
+            ):
+                if enabled:
+                    try:
+                        available = bool(read())
+                        print(f"{label} credential available: {'yes' if available else 'no'}")
+                    except (OSError, ValueError) as error:
+                        problems.append(f"{label} credential unavailable: {type(error).__name__}")
         if config.qbittorrent.url:
             from jellyorganize.downloads.qbittorrent import private_password
             print(f"qBittorrent API: {config.qbittorrent.url}")
@@ -473,17 +526,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Last run: {data['last_run']['finished_at'] if data['last_run'] else 'never'}")
             print(f"Last exit code: {data['last_run']['exit_code'] if data['last_run'] else '-'}")
             print(f"Open exceptions: {data['open_exceptions']}")
+            print(f"Pending integrations: {data['pending_integrations']}")
         else:
             for item in data:
                 print(f"[{item['status']}] {item['source']}\n  {item['reason']}")
             print(f"Open exceptions: {len(data)}")
         return 0
+    if args.command == "integrations":
+        from jellyorganize.integrations import flush
+        result = asyncio.run(flush(config))
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Sent: {result['sent']}  Failed: {result['failed']}  Pending: {result['pending']}")
+            for error in result["errors"]:
+                print(error, file=sys.stderr)
+        return 1 if result["failed"] else 0
     if args.command == "recover":
         try:
             counts, errors = recover(config)
             print("  ".join(f"{name}: {count}" for name, count in counts.items()))
             for error in errors:
                 print(error, file=sys.stderr)
+            asyncio.run(deliver_integrations(config))
             return 1 if errors else 0
         except (OSError, ValueError) as error:
             print(f"Recovery error: {error}", file=sys.stderr)
@@ -521,8 +586,9 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(make_plan(config, workflow, args.kind, args.v, auto=auto, quiet=args.command == "run",
                                          wait_for_completion=args.command == "organize" and auto))
         except (OSError, ValueError, ValidationError) as error:
-            if args.command == "run":
-                Operations(config.state_dir / "operations.sqlite3").failure(str(error))
+            if auto:
+                Operations(config.state_dir / "operations.sqlite3").failure(str(error), config=config)
+                asyncio.run(deliver_integrations(config))
             print(f"Application error: {error}", file=sys.stderr)
             return 1
         except KeyboardInterrupt:
@@ -539,7 +605,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         except (OSError, ValueError) as error:
             if not args.dry_run:
-                Operations(config.state_dir / "operations.sqlite3").failure(str(error))
+                Operations(config.state_dir / "operations.sqlite3").failure(str(error), config=config)
+                asyncio.run(deliver_integrations(config))
             print(f"Download handoff error: {error}", file=sys.stderr)
             return 1
         except KeyboardInterrupt:
@@ -552,6 +619,8 @@ def main(argv: list[str] | None = None) -> int:
             "tmdb": (config.service.credential_file, "TMDB_API_TOKEN"),
             "qbittorrent": (config.qbittorrent.password_file, "QBITTORRENT_PASSWORD"),
             "qbittorrent-proxy": (config.qbittorrent.basic_password_file, "QBITTORRENT_BASIC_PASSWORD"),
+            "jellyfin": (config.jellyfin.api_key_file, "JELLYFIN_API_KEY"),
+            "webhook": (config.notifications.webhook_url_file, "JELLYORGANIZE_WEBHOOK_URL"),
         }[args.provider]
         try:
             if args.from_env:
@@ -580,6 +649,25 @@ def main(argv: list[str] | None = None) -> int:
         return 3 if counts["CONFLICT"] else 0
     if args.command == "identify":
         return asyncio.run(identify(config, args.path, args.tmdb))
+    if args.command == "explain":
+        try:
+            plan = PlanStore(config.state_dir / "plans").load(args.plan_id)
+            if args.json:
+                print(json.dumps([{"source": str(entry.source), "status": entry.status,
+                                  "reason": entry.reason, "matching": entry.matching}
+                                 for entry in plan.entries], indent=2))
+            else:
+                from jellyorganize.metadata.explanation import lines
+                for entry in plan.entries:
+                    print(f"[{entry.status}] {entry.source}\n  {entry.reason}")
+                    for line in lines(entry.matching):
+                        print(f"  {line}")
+                    if not entry.matching:
+                        print("  This older plan has no saved matching evidence; create a new ingest or audit plan.")
+            return 0
+        except (OSError, ValueError) as error:
+            print(f"Cannot explain plan: {error}", file=sys.stderr)
+            return 1
     if args.command == "review":
         try:
             return asyncio.run(review(config, args.plan_id))
@@ -594,7 +682,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Cannot apply plan: {error}", file=sys.stderr)
             return 1
         show_transaction(transaction, counts)
-        return apply_status(plan, counts)
+        status = apply_status(plan, counts)
+        asyncio.run(finish_run(config, plan, status, counts, transaction))
+        return status
     cache = MetadataCache(config.cache_path)
     if args.action == "stats":
         total, valid = cache.stats()

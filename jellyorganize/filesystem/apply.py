@@ -37,8 +37,8 @@ def _release_conflict(entry: PlanEntry, ignored=()) -> bool:
     if parent.is_symlink() or not parent.is_dir():
         return True
     if entry.kind == "movie":
-        return any(path != entry.source and path not in ignored and path.suffix.lower() in MEDIA_EXTENSIONS
-                   for path in parent.iterdir() if path.is_file())
+        from jellyorganize.naming.movie_versions import movie_conflict
+        return movie_conflict(entry.destination, entry.source, ignored)
     prefix = " - ".join(entry.destination.stem.split(" - ")[:2])
     target_coverage = coverage(entry.destination)
     return any(path != entry.source and path not in ignored and path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS
@@ -208,6 +208,11 @@ def _apply_plan(plan: SavedPlan, config: Config, transaction_root: Path,
     plan = SavedPlan.model_validate(plan.model_dump(mode="json"))
     transaction = Transaction(transaction_root, plan.plan_id)
     transaction.data["transfer_mode"] = plan.transfer_mode
+    from jellyorganize.integrations import refresh_settings
+    settings = refresh_settings(config)
+    if settings is not None and plan.workflow in {"ingest", "audit"}:
+        transaction.data["jellyfin_refresh"] = settings
+        transaction.write()
     from jellyorganize.filesystem.links import LinkedImports
     links = LinkedImports(config)
     if auto_threshold is not None:

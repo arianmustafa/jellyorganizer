@@ -23,12 +23,16 @@ class Operations:
                 source TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL,
                 reason TEXT NOT NULL, first_seen REAL NOT NULL, last_seen REAL NOT NULL,
                 occurrences INTEGER NOT NULL, plan_id TEXT, resolved_at REAL)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS deliveries (
+                event_id TEXT PRIMARY KEY, channel TEXT NOT NULL, payload TEXT NOT NULL,
+                created_at REAL NOT NULL, sent_at REAL, attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT)""")
             with connection:
                 yield connection
         finally:
             connection.close()
 
-    def record(self, plan, exit_code, apply_counts=None, transaction=None, *, recovered_items=0):
+    def record(self, plan, exit_code, apply_counts=None, transaction=None, *, recovered_items=0, config=None):
         now = time.time()
         issues = {str(entry.source): (entry.kind, entry.status, entry.reason) for entry in plan.entries
                   if entry.status in {"REVIEW", "CONFLICT", "ERROR"}}
@@ -43,6 +47,7 @@ class Operations:
                    "recovered_items": recovered_items,
                    "transaction_id": transaction.data["transaction_id"] if transaction else None}
         with self.database() as connection:
+            changed = []
             # Resolve only sources actually covered by this run. Missing or
             # unreadable roots must not erase previous exceptions.
             covered = {str(entry.source) for entry in plan.entries}
@@ -53,24 +58,49 @@ class Operations:
                 row = connection.execute("SELECT * FROM exceptions WHERE source=?", (source,)).fetchone()
                 if row is None or row["resolved_at"] is not None or (row["status"], row["reason"]) != (status, reason):
                     summary["changed_exceptions"] += 1
+                    changed.append({"source": source, "kind": kind, "status": status, "reason": reason})
                 connection.execute("""INSERT INTO exceptions VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL)
                     ON CONFLICT(source) DO UPDATE SET kind=excluded.kind, status=excluded.status,
                     reason=excluded.reason, last_seen=excluded.last_seen,
                     occurrences=exceptions.occurrences+1, plan_id=excluded.plan_id, resolved_at=NULL""",
                     (source, kind, status, reason, now, now, plan.plan_id))
-            connection.execute("INSERT INTO runs(finished_at, exit_code, plan_id, summary) VALUES (?, ?, ?, ?)",
-                               (now, exit_code, plan.plan_id, json.dumps(summary)))
+            cursor = connection.execute("INSERT INTO runs(finished_at, exit_code, plan_id, summary) VALUES (?, ?, ?, ?)",
+                                        (now, exit_code, plan.plan_id, json.dumps(summary)))
+            if changed and config is not None and config.notifications.enabled:
+                self.enqueue(connection, f"webhook:{plan.plan_id}:{cursor.lastrowid}", "webhook",
+                             {"event": "exceptions", "plan_id": plan.plan_id, "exceptions": changed})
             # Run summaries are disposable; plans/journals remain for undo.
             connection.execute("DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY id DESC LIMIT 1000)")
         return summary
 
-    def failure(self, reason):
+    def failure(self, reason, *, config=None):
         now = time.time()
         summary = {"exit_code": 1, "error": reason}
         with self.database() as connection:
-            connection.execute("INSERT INTO runs(finished_at, exit_code, summary) VALUES (?, 1, ?)",
-                               (now, json.dumps(summary)))
+            previous = connection.execute("SELECT summary FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+            cursor = connection.execute("INSERT INTO runs(finished_at, exit_code, summary) VALUES (?, 1, ?)",
+                                        (now, json.dumps(summary)))
+            if (config is not None and config.notifications.enabled and
+                    (previous is None or json.loads(previous[0]).get("error") != reason)):
+                self.enqueue(connection, f"failure:{cursor.lastrowid}", "webhook",
+                             {"event": "failure", "error": reason})
             connection.execute("DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY id DESC LIMIT 1000)")
+
+    @staticmethod
+    def enqueue(connection, event_id, channel, payload):
+        payload = {**payload, "event_id": event_id}
+        connection.execute("INSERT OR IGNORE INTO deliveries(event_id, channel, payload, created_at) VALUES (?, ?, ?, ?)",
+                           (event_id, channel, json.dumps(payload), time.time()))
+
+    def pending_deliveries(self):
+        with self.database() as connection:
+            return [{**dict(row), "payload": json.loads(row["payload"])} for row in connection.execute(
+                "SELECT * FROM deliveries WHERE sent_at IS NULL ORDER BY created_at, event_id")]
+
+    def delivery_result(self, event_id, error=None):
+        with self.database() as connection:
+            connection.execute("UPDATE deliveries SET attempts=attempts+1, last_error=?, sent_at=? WHERE event_id=?",
+                               (error, None if error else time.time(), event_id))
 
     def exceptions(self):
         with self.database() as connection:
@@ -82,4 +112,5 @@ class Operations:
             healthy = connection.execute("SELECT finished_at FROM runs WHERE exit_code IN (0,2,3) ORDER BY id DESC LIMIT 1").fetchone()
             return {"last_run": ({**dict(last), "summary": json.loads(last["summary"])} if last else None),
                     "last_healthy_run": healthy[0] if healthy else None,
-                    "open_exceptions": connection.execute("SELECT COUNT(*) FROM exceptions WHERE resolved_at IS NULL").fetchone()[0]}
+                    "open_exceptions": connection.execute("SELECT COUNT(*) FROM exceptions WHERE resolved_at IS NULL").fetchone()[0],
+                    "pending_integrations": connection.execute("SELECT COUNT(*) FROM deliveries WHERE sent_at IS NULL").fetchone()[0]}

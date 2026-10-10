@@ -50,6 +50,7 @@ Configuration lives at **`~/.config/jellyorganize/config.toml`**, respecting `XD
 ```bash
 jellyorganize config show
 jellyorganize config check
+jellyorganize doctor
 jellyorganize organize --dry-run
 jellyorganize organize
 ```
@@ -114,9 +115,11 @@ the import fails while preserving originals; it never falls back to copying.
 
 Hard links are independent filenames for the same file data: editing through any
 name changes every linked name. Removing a name preserves the data while another
-link remains. Files still need to satisfy the selected completion policy, and
-qBittorrent imports still require fully downloaded, stopped torrents. Retained
-download paths can be used for seeding after the import finishes.
+link remains. Files still need to satisfy the selected completion policy.
+qBittorrent imports accept fully downloaded torrents that are stopped or seeding
+in hard-link mode, preserving download paths so seeding can continue during import.
+Checking, moving, errored, or incomplete downloads remain untouched. Move mode
+requires stopped torrents.
 
 Repeated runs recognize unchanged completed links and skip them without reporting
 duplicate conflicts. Missing links can be repaired from the retained original and
@@ -136,6 +139,43 @@ compatible mounts during audit, and scheduled imports follow recorded audit
 relocations instead of recreating obsolete names. Undo an audit before undoing the
 original import. For downloader imports, undo the library import first and the
 downloads → Incoming handoff second.
+
+## Filesystem checks
+
+Run `jellyorganize doctor` before importing, or use `doctor --json` for scripts.
+It checks each configured import stage with small disposable files, verifies
+actual hard-link inode identity, and cleans up its probes. Missing directories
+are reported without creating them. In hard-link mode, incompatible mounts or
+link permissions fail the check; move mode also checks destination writes when
+links are unavailable. Exit code `4` means a check failed.
+
+## Multiple movie versions
+
+Enable separate versions of the same movie with:
+
+```toml
+[naming]
+movie_versions = true
+```
+
+The label comes from the edition and resolution parsed from the filename, such
+as `1080p`, `2160p`, or `Extended 2160p`. For a specific label, add
+`[version-Theatrical]` or `[version-Director's Cut]` to the incoming filename.
+Files without these hints use `Original`. Subtitles receive the same version
+prefix. The resulting layout follows [Jellyfin's multiple-version naming rules](https://jellyfin.org/docs/general/server/media/movies/#multiple-versions):
+
+```text
+Movies/Dune (2021) [tmdbid-438631]/
+  Dune (2021) [tmdbid-438631] - 1080p.mkv
+  Dune (2021) [tmdbid-438631] - 1080p.en.srt
+  Dune (2021) [tmdbid-438631] - Extended 2160p.mkv
+```
+
+Different labels coexist; the same label, including a different extension or
+letter case, remains a conflict. No version replaces another automatically.
+An existing movie without a version label blocks additions until you explicitly
+audit it into the version layout. Saved plans keep their destination filenames
+even if this setting changes before apply. Movie versions are disabled by default.
 
 ## Unattended operation and credentials
 
@@ -164,9 +204,75 @@ jellyorganize exceptions
 
 On hosts where you choose systemd, `service show` displays the optional generated units and `service install --save-credential` writes units plus the private token for scheduled jobs. Installation does not enable the timer. The timer runs Incoming only, every `service.interval_seconds`; failures have bounded restart retries. User timers require an active user systemd manager. Systemd is not required to organize media or read the configuration.
 
+## Notifications and Jellyfin refresh
+
+Both integrations are optional and disabled by default. Enable either in TOML:
+
+```toml
+[notifications]
+enabled = true
+webhook_url_file = "~/.local/share/jellyorganize/webhook.url"
+
+[jellyfin]
+enabled = true
+url = "http://127.0.0.1:8096"
+api_key_file = "~/.local/share/jellyorganize/jellyfin.key"
+# Optional paths as seen by the Jellyfin server, such as container mounts:
+# movies_path = "/media/movies"
+# tv_path = "/media/tv"
+```
+
+Save credentials with hidden prompts:
+
+```bash
+jellyorganize credentials webhook
+jellyorganize credentials jellyfin
+jellyorganize config check
+```
+
+Enter the complete webhook URL and a Jellyfin API key respectively. Environment
+alternatives are `JELLYORGANIZE_WEBHOOK_URL` and `JELLYFIN_API_KEY`; use
+`credentials PROVIDER --from-env` to save an existing value. Webhook URLs remain
+outside TOML because their path or query can contain secrets. Credentials are
+excluded from plans, journals, and integration error messages.
+
+The webhook receives generic JSON from automatic runs and explicit apply:
+
+```json
+{
+  "event": "exceptions",
+  "event_id": "webhook:PLAN_ID:RUN_ID",
+  "plan_id": "PLAN_ID",
+  "exceptions": [{"source": "/media/Incoming/example.mkv", "kind": "movie", "status": "REVIEW", "reason": "ambiguous or unmatched TMDb search"}]
+}
+```
+
+Use an endpoint that accepts this JSON, or an adapter for your notification
+service. Only newly seen or changed problems generate alerts. Fatal failures
+use `event = "failure"` with an `error` field; identical consecutive failures
+are deduplicated. Delivery is at least once: the same `event_id` and
+`Idempotency-Key` header are retained across retries so receivers can deduplicate.
+
+After successful library imports and audits, Jellyfin receives targeted
+`/Library/Media/Updated` requests for changed media and companions. Audits also
+report the old paths as deleted. Downloads → Incoming handoffs, unchanged reused
+links, dry runs, and failed or rolled-back items do not trigger refreshes. The
+server URL and optional mount mapping are saved with each operation. A refresh
+queued for one server will not be sent to a different configured server.
+
+Problems with either server leave media results intact. Pending deliveries
+survive restarts and retry on the next automatic run, apply, recovery, or
+`jellyorganize integrations`. `integrations --json` gives delivery counts and
+errors; `status` reports the number pending. HTTP redirects are refused, requests
+have a five-second timeout, and each pass attempts at most twenty deliveries,
+pausing a failed channel until the next pass. Disabling an integration pauses its
+pending deliveries. Enabling refresh does not replay older imports performed
+while it was disabled. Undo changes local files; use Jellyfin's normal scan to
+update its view after an undo.
+
 ## qBittorrent and Qui automation
 
-The optional hook checks qBittorrent's current state, imports a fully downloaded **stopped** torrent into Incoming, then automatically organizes eligible media. It moves files by default or retains originals with hard links when `filesystem.mode = "hardlink"`. It retains the torrent entry and never sends torrent deletion, stop, or resume requests. Seeding torrents remain untouched. Configure your seeding policy separately so qBittorrent stops torrents when the desired ratio or time is reached; download completion alone does not trigger handoff.
+The optional hook checks qBittorrent's current state, imports a fully downloaded torrent into Incoming, then automatically organizes eligible media. Move mode requires the torrent to be **stopped**. Hard-link mode accepts completed seeders and preserves their original paths while importing. The hook retains torrent entries and never sends deletion, stop, or resume requests. Configure your seeding policy separately.
 
 Add these sections to your configuration, replacing the examples with your own paths and API address:
 
@@ -197,9 +303,9 @@ In [Qui External Programs](https://github.com/autobrr/qui/blob/develop/documenta
 import-download --torrent "{hash}"
 ```
 
-Create a [Qui automation rule](https://github.com/autobrr/qui/blob/develop/documentation/docs/features/automations.md) with **State = stopped**, **Progress = 100%**, and an appropriate media category or tag. Its action runs the registered external program. Run Qui's program test against an eligible torrent with `--dry-run` added first. Use the installed executable's absolute path. Qui executes programs on its backend host; if it runs in a container, the executable, configuration, credentials, media paths, and state must all be available inside that container.
+Create a [Qui automation rule](https://github.com/autobrr/qui/blob/develop/documentation/docs/features/automations.md) with **Progress = 100%** and an appropriate media category or tag. Move mode also needs **State = stopped**; hard-link mode can run while the completed torrent is seeding. Its action runs the registered external program. Run Qui's program test against an eligible torrent with `--dry-run` added first. Use the installed executable's absolute path. Qui executes programs on its backend host; if it runs in a container, the executable, configuration, credentials, media paths, and state must all be available inside that container.
 
-The hook verifies the exact torrent hash, selected-file completion and sizes, current stopped state, other torrents sharing the same paths, path containment, and destination collisions independently of Qui's rule. qBittorrent 4's `pausedUP` and 5's `stoppedUP` are supported. A previously verified interrupted handoff can recover from `missingFiles`; a new import in that state is rejected. Repeated rule evaluations reuse the durable hash record rather than moving the same torrent twice. An HTTP or filesystem failure leaves work retryable; a metadata failure leaves the completed download in Incoming, where `organize` or `run` can retry it.
+The hook verifies the exact torrent hash, selected-file completion and sizes, current state, other torrents sharing the same paths, path containment, and destination collisions independently of Qui's rule. qBittorrent 4's `pausedUP` and 5's `stoppedUP` are supported. Hard-link mode also accepts `uploading`, `stalledUP`, `queuedUP`, and `forcedUP` with progress exactly 100% and no bytes remaining; incomplete overlapping torrents still block import. A previously verified interrupted handoff can recover from `missingFiles`; a new import in that state is rejected. Repeated rule evaluations reuse the durable hash record rather than moving the same torrent twice. An HTTP or filesystem failure leaves work retryable; a metadata failure leaves the completed download in Incoming, where `organize` or `run` can retry it.
 
 Nested folders are preserved during handoff:
 
@@ -213,11 +319,16 @@ TV Shows/Show (year) [tmdbid-ID]/Season 02/…mkv
 
 Selected subtitles and release files retain their relative paths into Incoming. Supported sidecars then follow their media into the library; unknown notes or ambiguous media stay in Incoming. Unselected files remain in downloads, and empty directories are retained. In move mode, the kept torrent entry points at its old download paths and may display missing files after a recheck; resuming it requires undoing the moves first. Hard-link mode preserves those download paths. To undo the whole workflow, undo the organization transaction, then the handoff transaction. The hook prints both transaction IDs as JSON.
 
-For manual testing, use `import-download --torrent HASH --dry-run`; `--handoff-only` moves into Incoming without organizing. The qBittorrent API and filesystem cannot be locked together: do not resume a torrent while its handoff is running.
+For manual testing, use `import-download --torrent HASH --dry-run`; `--handoff-only` imports into Incoming without organizing. The qBittorrent API and filesystem cannot be locked together: avoid rechecking, relocating, or changing download contents during handoff. In move mode, keep the torrent stopped throughout import.
 
 ## Automatic matching
 
 The automatic floor is **0.97**, or the configured threshold if higher. Scores represent evidence rules, not calibrated probabilities.
+
+Review shows the parsed title/year, effective matching title/year, and whether
+each saved candidate agrees. Inspect this evidence later without network access
+using `jellyorganize explain PLAN_ID`, or `explain PLAN_ID --json`. Older plans
+remain usable; create a new ingest or audit plan to save matching evidence.
 
 * Movies can score 0.98 when exactly one TMDb result matches the local title and year and a details lookup confirms its identity. Every search page is read, up to ten; incomplete searches cannot establish uniqueness. Missing years, fuzzy matches, contradictions, and multiple exact candidates remain unresolved. This uses one provider. Set `[matching] confirm_exact_movies = false` to require an explicit or manually saved identity instead.
 * TV uses TMDb and TVmaze title/year and episode evidence, with shared external IDs supporting yearless series. A single titled episode with different release numbering can map to TMDb's episode when both providers uniquely agree on its title, season, and series IDs. Missing or contradictory evidence leaves it untouched.
@@ -249,12 +360,15 @@ State is stored under `~/.local/state/jellyorganize/`, identities under `~/.loca
 | `config init\|show\|check` | Create, inspect, or validate configuration. |
 | `config check --download-client` | Also authenticate and test the configured qBittorrent API. |
 | `credentials tmdb\|qbittorrent\|qbittorrent-proxy` | Save a private credential with a hidden prompt or `--from-env`. |
-| `import-download --torrent HASH` | Hand off a completed, stopped torrent and organize Incoming. |
+| `import-download --torrent HASH` | Import a completed torrent and organize Incoming; hard-link mode allows seeding. |
 | `ready PATH` | Acknowledge a completed download for marker mode. |
 | `status`, `exceptions` | Show health and unresolved files; both support `--json`. |
 | `service install\|show` | Generate or display user systemd units. |
 | `recover`, `undo TRANSACTION_ID` | Resume interrupted work or reverse completed moves. |
 | `benchmark` | Run labeled matching checks. |
+| `doctor [--json]` | Probe directory access and actual hard-link support. |
+| `explain PLAN_ID [--json]` | Inspect saved matching evidence without provider requests. |
+| `integrations [--json]` | Retry pending webhooks and targeted Jellyfin refreshes. |
 | `cache stats\|clear` | Inspect or clear cached metadata. |
 | `ingest [all\|movies\|tv]` | Save an Incoming plan; `--auto` also applies eligible entries. |
 | `audit [all\|movies\|tv]` | Explicitly plan existing-library repairs; `--auto` applies strong repairs. |

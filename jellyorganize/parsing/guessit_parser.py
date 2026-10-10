@@ -8,7 +8,8 @@ from pathlib import Path
 from guessit import guessit
 
 
-FIELDS = ("title", "year", "season", "episode", "episode_title", "part", "language", "release_group", "source", "screen_size")
+FIELDS = ("title", "year", "season", "episode", "episode_title", "part", "language", "release_group", "source", "screen_size", "edition")
+VERSION_TAG = re.compile(r"\[version-([^\[\]]+)\]", re.IGNORECASE)
 EPISODE_TITLE_AFTER_CODE = re.compile(r"\bS\d{1,2}E\d{1,3}(?:-?E\d{1,3})*\s*[-–—]\s*(.+)$", re.IGNORECASE)
 BRACKETED_RELEASE_SUFFIX = re.compile(
     r"\s+[-–—]\s+\[(?=[^][]*(?:WEB|BluRay|HDTV|HDLight|DVDRip|REMUX|720p|1080p|2160p))[^][]+\]"
@@ -19,8 +20,12 @@ PARENTHESIZED_RELEASE_SUFFIX = re.compile(
 
 
 def parse_filename(path: Path, kind: str) -> dict:
-    parsed = guessit(path.name, {"type": "episode" if kind == "tv" else "movie"})
+    labels = VERSION_TAG.findall(path.name) if kind == "movie" else []
+    name = VERSION_TAG.sub("", path.name) if labels else path.name
+    parsed = guessit(name, {"type": "episode" if kind == "tv" else "movie"})
     result = {key: parsed[key] for key in FIELDS if key in parsed}
+    if labels:
+        result["version_label"] = labels[0] if len(labels) == 1 else ""
     for key in ("year", "season"):
         if key in result:
             try:

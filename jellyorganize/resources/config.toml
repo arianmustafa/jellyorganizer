@@ -26,6 +26,8 @@ confirm_exact_movies = true
 [naming]
 include_tmdb_id = true
 include_episode_title = true
+# Keep multiple movie releases using Jellyfin version labels.
+movie_versions = false
 
 [scanning]
 ignored_tv_directories = ["Featurettes"]
@@ -47,7 +49,8 @@ credential_file = "~/.local/share/jellyorganize/tmdb.token"
 
 # Optional qBittorrent/Qui handoff. Both paths and the API URL are configurable.
 # Keep this disabled by leaving downloads.path and qbittorrent.url unset.
-# Handoffs require a shared incoming.path and retain stopped torrent entries.
+# Handoffs require a shared incoming.path. Hardlink mode permits completed seeders;
+# move mode requires stopped torrents. Torrent entries are retained in both modes.
 # [downloads]
 # path = "~/downloads/qbittorrent"
 #
@@ -58,3 +61,19 @@ credential_file = "~/.local/share/jellyorganize/tmdb.token"
 # Optional reverse-proxy HTTP Basic authentication, separate from WebUI login:
 # basic_username = "your-proxy-user"
 # basic_password_file = "~/.local/share/jellyorganize/qbittorrent-basic.password"
+
+# Optional JSON webhook for new or changed problems. Store the private URL with
+# `jellyorganize credentials webhook`, or set JELLYORGANIZE_WEBHOOK_URL.
+[notifications]
+enabled = false
+webhook_url_file = "~/.local/share/jellyorganize/webhook.url"
+
+# Optional targeted refresh after successful library imports and repairs.
+# Store the key with `jellyorganize credentials jellyfin`, or set JELLYFIN_API_KEY.
+[jellyfin]
+enabled = false
+# url = "http://127.0.0.1:8096"
+api_key_file = "~/.local/share/jellyorganize/jellyfin.key"
+# Optional paths as seen by Jellyfin (for different Docker/server mount paths):
+# movies_path = "/media/movies"
+# tv_path = "/media/tv"

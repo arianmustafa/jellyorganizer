@@ -26,7 +26,13 @@ def already_canonical(item: MediaItem, config: Config) -> bool:
         if len(parts) != 2 or not (match := FOLDER.fullmatch(parts[0])):
             return False
         title, year, _ = match.groups()
-        if safe_name(title) != title or item.path.stem != f"{title} ({year})":
+        if safe_name(title) != title:
+            return False
+        if config.naming.movie_versions:
+            from jellyorganize.naming.movie_versions import version_of
+            if version_of(item.path) is None:
+                return False
+        elif item.path.stem != f"{title} ({year})":
             return False
     else:
         if len(parts) != 3 or not (match := FOLDER.fullmatch(parts[0])):
@@ -73,11 +79,12 @@ def _conflict(proposal: Proposal) -> bool:
         return False
     if parent.is_symlink() or not parent.is_dir():
         return True
+    if proposal.item.kind == "movie":
+        from jellyorganize.naming.movie_versions import movie_conflict
+        return movie_conflict(destination, proposal.item.path)
     for path in parent.iterdir():
         if path == proposal.item.path or not path.is_file() or path.suffix.lower() not in MEDIA_EXTENSIONS:
             continue
-        if proposal.item.kind == "movie":
-            return True
         target_coverage = coverage(destination)
         if overlaps(destination, path) or (target_coverage and len(target_coverage[1]) > 1 and coverage(path) is None):
             return True
@@ -136,7 +143,8 @@ async def plan_audit(scan: ScanResult, config: Config, tmdb, tvmaze=None, identi
             proposal.status = "CONFLICT"
             proposal.reason = "destination exists or another release occupies the target"
         paths = [proposal.destination, *proposal.sidecar_destinations.values()]
-        release_key = (proposal.destination.parent,) if proposal.item.kind == "movie" else (
+        from jellyorganize.naming.movie_versions import release_key as movie_release_key
+        release_key = movie_release_key(proposal.destination) if proposal.item.kind == "movie" else (
             proposal.destination.parent, " - ".join(proposal.destination.stem.split(" - ")[:2]))
         if release_key in releases:
             proposal.status = releases[release_key].status = "CONFLICT"
@@ -166,4 +174,7 @@ async def plan_audit(scan: ScanResult, config: Config, tmdb, tvmaze=None, identi
         ):
             proposal.status = "CONFLICT"
             proposal.reason = "another source file covers the same TV episode"
+    from jellyorganize.metadata.explanation import explain
+    for proposal in proposals:
+        proposal.matching = explain(proposal)
     return proposals

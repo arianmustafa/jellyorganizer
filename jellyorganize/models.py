@@ -65,3 +65,4 @@ class Proposal:
     destination: Path | None = None
     sidecar_destinations: dict[Path, Path] = field(default_factory=dict)
     alternatives: list[Candidate] = field(default_factory=list)
+    matching: dict = field(default_factory=dict)

@@ -39,6 +39,7 @@ class Paths(Section):
 class Naming(Section):
     include_tmdb_id: bool = True
     include_episode_title: bool = True
+    movie_versions: bool = False
 
 
 class Matching(Section):
@@ -138,6 +139,43 @@ class QBittorrent(Section):
         return absolute_path(value) if value is not None else None
 
 
+class Notifications(Section):
+    enabled: bool = False
+    webhook_url_file: Path = Field(default_factory=lambda: Path("~/.local/share/jellyorganize/webhook.url").expanduser())
+
+    @field_validator("webhook_url_file", mode="before")
+    @classmethod
+    def expand_path(cls, value):
+        return absolute_path(value)
+
+
+class Jellyfin(Section):
+    enabled: bool = False
+    url: str | None = None
+    api_key_file: Path = Field(default_factory=lambda: Path("~/.local/share/jellyorganize/jellyfin.key").expanduser())
+    movies_path: Path | None = None
+    tv_path: Path | None = None
+
+    @field_validator("url")
+    @classmethod
+    def api_url(cls, value):
+        try:
+            return QBittorrent.api_url(value)
+        except ValueError as error:
+            raise ValueError(str(error).replace("qBittorrent", "Jellyfin")) from error
+
+    @field_validator("api_key_file", "movies_path", "tv_path", mode="before")
+    @classmethod
+    def expand_path(cls, value):
+        return absolute_path(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def configured_server(self):
+        if self.enabled and not self.url:
+            raise ValueError("jellyfin.enabled requires jellyfin.url")
+        return self
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     movies: Paths = Field(default_factory=lambda: Paths(library="~/media/Movies", incoming="~/media/Incoming/Movies"))
@@ -151,6 +189,8 @@ class Config(BaseModel):
     service: Service = Field(default_factory=Service)
     downloads: Downloads = Field(default_factory=Downloads)
     qbittorrent: QBittorrent = Field(default_factory=QBittorrent)
+    notifications: Notifications = Field(default_factory=Notifications)
+    jellyfin: Jellyfin = Field(default_factory=Jellyfin)
     schema_version: Literal[1] = 1
 
     @model_validator(mode="before")
