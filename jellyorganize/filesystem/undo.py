@@ -8,10 +8,10 @@ from jellyorganize.filesystem.locking import media_lock
 from jellyorganize.filesystem.safety import UnsafePath, relative_file
 from jellyorganize.filesystem.transaction import Transaction
 from jellyorganize.planning.store import FileState, PlanStore, configured_roots
-from jellyorganize.filesystem.durable import journal_move, new_receipt, discard_stage, checkpoint
+from jellyorganize.filesystem.durable import journal_move, new_receipt, discard_stage, checkpoint, validate_mode
 
 
-def _reverse_files(record, entry, config, workflow):
+def _reverse_files(record, entry, config, workflow, mode="move"):
     if entry.status != "CONFIRMED":
         raise UnsafePath("transaction item was not confirmed in saved plan")
     source_root, destination_root = configured_roots(config, entry.kind, workflow)
@@ -41,7 +41,13 @@ def _reverse_files(record, entry, config, workflow):
         if state.source != planned.destination or state.destination != planned.source or state.size != planned.size:
             raise UnsafePath("transaction reverse paths do not match saved plan")
         _check_unchanged(state, entry.destination_root)
-        if state.destination.exists() or state.destination.is_symlink():
+        if mode == "hardlink":
+            _check_unchanged(planned, entry.source_root)
+            if (state.device, state.inode, state.mtime_ns) != (planned.device, planned.inode, planned.mtime_ns):
+                raise UnsafePath("undo destination is not the recorded hard link")
+            if file.get("reused"):
+                continue
+        elif state.destination.exists() or state.destination.is_symlink():
             raise FileExistsError(f"original path is occupied: {state.destination}")
         reverse.append((file, state))
     return reverse
@@ -56,9 +62,10 @@ def undo_transaction(transaction_id: str, config: Config) -> tuple[Transaction, 
         if original.data.get("operation") == "undo":
             raise ValueError("use the original apply transaction ID for undo")
         plan = PlanStore(config.state_dir / "plans").load(original.data["plan_id"])
+        mode = validate_mode(original, plan)
         entries = {str(entry.source): entry for entry in plan.entries}
         transaction = Transaction(root, plan.plan_id)
-        transaction.data.update(operation="undo", undo_of=transaction_id)
+        transaction.data.update(operation="undo", undo_of=transaction_id, transfer_mode=mode)
         transaction.write()
         counts = {"UNDONE": 0, "STALE": 0, "CONFLICT": 0, "ERROR": 0, "UNTOUCHED": 0}
         for record in reversed(original.data["items"]):
@@ -67,15 +74,20 @@ def undo_transaction(transaction_id: str, config: Config) -> tuple[Transaction, 
                 continue
             result = {"source": record.get("destination"), "destination": record.get("source"),
                       "original_source": record.get("source"), "kind": record.get("kind"),
-                      "status": "started", "files": [], "moves": []}
+                      "status": "started", "files": [], "moves": [], "transfer_mode": mode}
             transaction.append(result)
             moved = []
             try:
                 entry = entries.get(record.get("source"))
                 if entry is None:
                     raise UnsafePath("transaction source is absent from saved plan")
-                reverse = _reverse_files(record, entry, config, plan.workflow)
-                result["moves"] = [new_receipt(state, entry.destination_root, entry.source_root)
+                validate_mode(original, plan, record)
+                reverse = _reverse_files(record, entry, config, plan.workflow, mode)
+                from jellyorganize.filesystem.links import LinkedImports
+                links = LinkedImports(config)
+                result["moves"] = [new_receipt(state, entry.destination_root, entry.source_root,
+                                              "unlink" if mode == "hardlink" else "move",
+                                              link_only=plan.workflow == "audit" and links.protected(state))
                                    for _, state in reversed(reverse)]
                 transaction.write()
                 # Move the media back first, then its sidecars, reversing apply order.
@@ -113,7 +125,9 @@ def undo_transaction(transaction_id: str, config: Config) -> tuple[Transaction, 
                     for file, state in reversed(moved):
                         try:
                             receipt = next(move for move in result["moves"] if move["source_state"]["source"] == str(state.destination))
-                            rollback = receipt["rollback"] = new_receipt(state, entry.source_root, entry.destination_root)
+                            rollback = receipt["rollback"] = new_receipt(state, entry.source_root, entry.destination_root,
+                                                                         "hardlink" if mode == "hardlink" else "move",
+                                                                         link_only=receipt.get("link_only", False))
                             with journal_move(transaction, rollback):
                                 refreshed = _move_file(state, entry.source_root, entry.destination_root, config)
                             receipt["phase"] = "rolled_back"

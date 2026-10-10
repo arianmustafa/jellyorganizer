@@ -35,10 +35,19 @@ def rename_noreplace(parent: int, source: str, destination: str) -> None:
         raise OSError(error, os.strerror(error), destination)
 
 
-def new_receipt(file: FileState, source_root: Path, destination_root: Path) -> dict:
+def new_receipt(file: FileState, source_root: Path, destination_root: Path, mode: str = "move", *, link_only=False) -> dict:
     return {"source_state": file.model_dump(mode="json"), "source_root": str(source_root),
             "destination_root": str(destination_root), "stage": f".jellyorganize-{secrets.token_hex(16)}.part",
-            "phase": "intent"}
+            "phase": "intent", "transfer_mode": mode, "link_only": link_only}
+
+
+def validate_mode(transaction, plan, record=None):
+    mode = transaction.data.get("transfer_mode", "move")
+    if mode != plan.transfer_mode or (transaction.data.get("version", 1) < 3 and mode != "move"):
+        raise UnsafePath("transaction mode does not match saved plan")
+    if record is not None and record.get("transfer_mode", "move") != mode:
+        raise UnsafePath("item mode does not match saved plan")
+    return mode
 
 
 @contextmanager
@@ -70,6 +79,9 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
     if (receipt["source_state"] != file.model_dump(mode="json") or
             receipt["source_root"] != str(source_root) or receipt["destination_root"] != str(destination_root)):
         raise UnsafePath("move receipt does not match file decisions")
+    mode = receipt.get("transfer_mode", "move")
+    if mode not in {"move", "hardlink", "unlink"}:
+        raise UnsafePath("unsupported receipt mode")
     stage_name = receipt["stage"]
     if (not stage_name.startswith(".jellyorganize-") or not stage_name.endswith(".part") or
             Path(stage_name).name != stage_name):
@@ -91,12 +103,32 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
                 raise UnsafePath("destination receipt paths or size do not match the planned move")
         final = _exists(destination_parent, destination_name)
         source = _exists(source_parent, source_name)
+        if mode == "unlink":
+            # The destination is the retained original. Its recorded identity is
+            # required even when a previous attempt already removed the link.
+            retained = _state(file, assert_state(destination_parent, destination_name, file))
+            if source is not None:
+                current = assert_state(source_parent, source_name, file)
+                if current.st_nlink < 2 or file.source == file.destination:
+                    raise UnsafePath("cannot remove the last retained hard link")
+                os.unlink(source_name, dir_fd=source_parent)
+                os.fsync(source_parent)
+                checkpoint("link_removed")
+            receipt["destination_state"] = retained.model_dump(mode="json")
+            receipt["phase"] = "moved"
+            transaction.write()
+            checkpoint("move_recorded")
+            return retained
         if final is not None:
             if destination_state is None:
                 raise FileExistsError(f"destination exists without our receipt: {file.destination}")
             expected = FileState.model_validate(destination_state)
             assert_state(destination_parent, destination_name, expected)
-            if source is not None:
+            if mode == "hardlink":
+                assert_state(source_parent, source_name, file)
+                if (expected.device, expected.inode) != (file.device, file.inode):
+                    raise UnsafePath("destination is not a hard link to the retained source")
+            if source is not None and mode == "move":
                 assert_state(source_parent, source_name, file)
                 os.unlink(source_name, dir_fd=source_parent)
                 os.fsync(source_parent)
@@ -107,7 +139,14 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
             return expected
         if source is None:
             raise UnsafePath(f"both source and recorded destination are missing: {file.source}")
+        if receipt.get("reused"):
+            # A link that vanished after preflight must be created by this
+            # operation, so its later undo owns that newly published name.
+            receipt["reused"] = False
+            transaction.write()
         assert_state(source_parent, source_name, file)
+        if (mode == "hardlink" or receipt.get("link_only")) and os.fstat(destination_parent).st_dev != file.device:
+            raise OSError(errno.EXDEV, "hard links require the same filesystem")
         staged = _exists(destination_parent, stage_name)
         if receipt["phase"] in ("verified", "published", "moved"):
             if staged is None or destination_state is None:
@@ -145,6 +184,8 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
                 stack.callback(os.close, staged_file)
                 os.fsync(staged_file)
             except OSError as error:
+                if mode == "hardlink" or receipt.get("link_only"):
+                    raise
                 if error.errno not in (errno.EXDEV, errno.EOPNOTSUPP, errno.EPERM):
                     raise
                 source_file = os.open(source_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=source_parent)
@@ -189,6 +230,8 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
         # All completed bytes and their ownership are durable before publication.
         assert_state(source_parent, source_name, file)
         expected = FileState.model_validate(receipt["destination_state"])
+        if (mode == "hardlink" or receipt.get("link_only")) and (expected.device, expected.inode) != (file.device, file.inode):
+            raise UnsafePath("staged file is not a hard link to the source")
         assert_state(destination_parent, stage_name, expected)
         rename_noreplace(destination_parent, stage_name, destination_name)
         os.fsync(destination_parent)
@@ -197,9 +240,12 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
         transaction.write()
         assert_state(source_parent, source_name, file)
         assert_state(destination_parent, destination_name, expected)
-        os.unlink(source_name, dir_fd=source_parent)
-        os.fsync(source_parent)
-        checkpoint("source_removed")
+        if mode == "move":
+            os.unlink(source_name, dir_fd=source_parent)
+            os.fsync(source_parent)
+            checkpoint("source_removed")
+        else:
+            checkpoint("source_retained")
         receipt["phase"] = "moved"
         transaction.write()
         checkpoint("move_recorded")

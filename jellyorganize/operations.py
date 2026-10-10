@@ -38,7 +38,7 @@ class Operations:
                     issues[item["source"]] = (item.get("kind", "movie"), item["status"].upper(), item.get("error", "apply failed"))
         counts = {key: sum(entry.status == key for entry in plan.entries)
                   for key in ("CONFIRMED", "REVIEW", "CONFLICT", "ERROR", "SKIP")}
-        summary = {"plan_id": plan.plan_id, "exit_code": exit_code, "counts": counts,
+        summary = {"plan_id": plan.plan_id, "transfer_mode": plan.transfer_mode, "exit_code": exit_code, "counts": counts,
                    "apply": apply_counts or {}, "changed_exceptions": 0, "scope": plan.scope,
                    "recovered_items": recovered_items,
                    "transaction_id": transaction.data["transaction_id"] if transaction else None}

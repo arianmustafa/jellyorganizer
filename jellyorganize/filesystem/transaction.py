@@ -31,14 +31,14 @@ class Transaction:
                 not isinstance(transaction.data.get("items"), list) or
                 not all(isinstance(item, dict) for item in transaction.data["items"])):
             raise ValueError("invalid transaction journal")
-        if transaction.data.get("version", 1) not in (1, 2):
+        if transaction.data.get("version", 1) not in (1, 2, 3):
             raise ValueError("unsupported transaction journal version")
         return transaction
 
     def __init__(self, root: Path, plan_id: str):
         root.mkdir(parents=True, exist_ok=True)
         self.path = root / (datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(4) + ".json")
-        self.data = {"version": 2, "transaction_id": self.path.stem, "plan_id": plan_id,
+        self.data = {"version": 3, "transfer_mode": "move", "transaction_id": self.path.stem, "plan_id": plan_id,
                      "created_at": datetime.now(timezone.utc).isoformat(), "items": []}
         descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(descriptor)

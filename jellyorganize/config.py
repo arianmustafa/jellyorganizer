@@ -78,6 +78,7 @@ class Providers(Section):
 
 
 class Filesystem(Section):
+    mode: Literal["move", "hardlink"] = "move"
     verify_cross_filesystem_copy: bool = True
     hash_algorithm: str = "sha256"
 

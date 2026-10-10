@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from jellyorganize.config import Config
 from jellyorganize.models import Candidate, Proposal, Status
@@ -46,6 +46,7 @@ class PlanEntry(BaseModel):
 class SavedPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = 1
+    transfer_mode: Literal["move", "hardlink"] = "move"
     workflow: Literal["ingest", "audit", "handoff"] = "ingest"
     plan_id: str
     created_at: str
@@ -56,6 +57,14 @@ class SavedPlan(BaseModel):
     download_hash: str | None = None
     downloader_url: str | None = None
     download_source: Path | None = None
+
+    @model_validator(mode="after")
+    def supported_mode(self):
+        if self.version not in (1, 2):
+            raise ValueError("plan ID or version mismatch")
+        if (self.version == 1 or self.workflow == "audit") and self.transfer_mode != "move":
+            raise ValueError("legacy and audit plans must use move mode")
+        return self
 
 
 def configured_roots(config: Config, kind: str, workflow: str) -> tuple[Path, Path]:
@@ -112,7 +121,8 @@ class PlanStore:
     def create(self, proposals: list[Proposal], config: Config, scope: tuple[str, ...] | None = None,
                workflow: Literal["ingest", "audit"] = "ingest") -> SavedPlan:
         scope = scope or tuple(sorted({proposal.item.kind for proposal in proposals}))
-        plan = SavedPlan(plan_id=datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(4),
+        plan = SavedPlan(version=2, transfer_mode=config.filesystem.mode if workflow == "ingest" else "move",
+                         plan_id=datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(4),
                          workflow=workflow,
                          created_at=datetime.now(timezone.utc).isoformat(),
                          scope=list(scope),
@@ -128,7 +138,8 @@ class PlanStore:
         source_root, destination_root = configured_roots(config, "download", "handoff")
         if not states:
             raise ValueError("handoff plan must contain files")
-        plan = SavedPlan(plan_id=datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(4),
+        plan = SavedPlan(version=2, transfer_mode=config.filesystem.mode,
+                         plan_id=datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(4),
                          workflow="handoff", created_at=datetime.now(timezone.utc).isoformat(), scope=["download"],
                          source_roots={"download": source_root}, destination_roots={"download": destination_root},
                          download_hash=torrent_id, downloader_url=downloader_url, download_source=content_path,
@@ -162,6 +173,6 @@ class PlanStore:
             raise ValueError("invalid plan ID")
         path = self.root / f"{plan_id}.json"
         plan = SavedPlan.model_validate_json(path.read_text(encoding="utf-8"))
-        if plan.plan_id != plan_id or plan.version != 1:
+        if plan.plan_id != plan_id:
             raise ValueError("plan ID or version mismatch")
         return plan

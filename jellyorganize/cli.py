@@ -45,7 +45,7 @@ def parser() -> argparse.ArgumentParser:
     scan.add_argument("kind", choices=["movies", "tv", "all"])
     organize = commands.add_parser("organize", help="automatically organize Incoming; leave uncertain files untouched")
     organize.add_argument("kind", choices=["movies", "tv", "all"], nargs="?", default="all")
-    organize.add_argument("--dry-run", action="store_true", help="save and show decisions without moving files")
+    organize.add_argument("--dry-run", action="store_true", help="save and show decisions without moving or linking files")
     run = commands.add_parser("run", help="scheduled Incoming run with compact logs and persistent exceptions")
     run.add_argument("kind", choices=["movies", "tv", "all"], nargs="?", default="all")
     configuration = commands.add_parser("config", help="create, inspect, or validate TOML configuration")
@@ -65,7 +65,7 @@ def parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--corpus", type=Path, help="custom labeled corpus JSON")
     benchmark.add_argument("--live", action="store_true", help="use live providers instead of frozen snapshots")
     benchmark.add_argument("--output", type=Path, help="save the full machine-readable report")
-    download = commands.add_parser("import-download", help="move a completed, stopped torrent into Incoming and organize it")
+    download = commands.add_parser("import-download", help="move or hard-link a completed, stopped torrent into Incoming and organize it")
     download.add_argument("--torrent", required=True, help="qBittorrent info hash (Qui: {hash})")
     download.add_argument("--dry-run", action="store_true", help="verify client and files and save a handoff plan without moving")
     download.add_argument("--handoff-only", action="store_true", help="move to Incoming without metadata organization")
@@ -138,6 +138,7 @@ def show_plan(plan, verbose: int, *, auto: bool = False) -> int:
     counts = {key: 0 for key in ("CONFIRMED", "REVIEW", "SKIP", "CONFLICT", "ERROR")}
     print(f"Plan: {plan.plan_id}")
     print(f"Workflow: {plan.workflow.upper()}")
+    print(f"Transfer: {plan.transfer_mode.upper()}" + (" (originals retained)" if plan.transfer_mode == "hardlink" else ""))
     for entry in plan.entries:
         counts[entry.status] += 1
         label = "UNKNOWN" if entry.reason.startswith("media type is ambiguous") else entry.kind.upper()
@@ -405,6 +406,7 @@ def main(argv: list[str] | None = None) -> int:
             problems.append(str(error))
             configured_token = False
         print(f"Configuration: {(args.config or config_path()).expanduser().absolute()}")
+        print(f"Import transfer mode: {config.filesystem.mode}" + (" (originals retained)" if config.filesystem.mode == "hardlink" else ""))
         print(f"TMDb credential available: {'yes' if configured_token else 'no (cached lookups only)'}")
         if config.qbittorrent.url:
             from jellyorganize.downloads.qbittorrent import private_password
@@ -530,7 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         from jellyorganize.downloads.handoff import import_torrent
         try:
             plan, result = import_torrent(config, args.torrent, dry_run=args.dry_run)
-            print(json.dumps({"download": result, "plan_id": plan.plan_id if plan else None}, sort_keys=True))
+            print(json.dumps({"download": result, "plan_id": plan.plan_id if plan else None,
+                              "transfer_mode": plan.transfer_mode if plan else config.filesystem.mode}, sort_keys=True))
             if plan is not None and not args.dry_run and not args.handoff_only:
                 return asyncio.run(make_plan(config, "ingest", "all", args.v, auto=True, quiet=True, wait_for_completion=True))
             return 0

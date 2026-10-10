@@ -34,6 +34,9 @@ ignored_tv_directories = ["Featurettes"]
 tvmaze = true
 
 [filesystem]
+# move: relocate files (default); hardlink: retain originals at both import stages.
+# Hard links require compatible mounts of the same filesystem; there is no copy fallback.
+mode = "move"
 hash_algorithm = "sha256"
 
 [service]

@@ -18,7 +18,7 @@ from jellyorganize.parsing.episode_codes import coverage, overlaps
 from jellyorganize.scanner.sidecars import MEDIA_EXTENSIONS
 
 
-def _release_conflict(entry: PlanEntry) -> bool:
+def _release_conflict(entry: PlanEntry, ignored=()) -> bool:
     if entry.kind == "download":
         return False  # Handoffs check every exact destination; identities are resolved in Incoming.
     if entry.destination is None:
@@ -37,18 +37,18 @@ def _release_conflict(entry: PlanEntry) -> bool:
     if parent.is_symlink() or not parent.is_dir():
         return True
     if entry.kind == "movie":
-        return any(path != entry.source and path.suffix.lower() in MEDIA_EXTENSIONS
+        return any(path != entry.source and path not in ignored and path.suffix.lower() in MEDIA_EXTENSIONS
                    for path in parent.iterdir() if path.is_file())
     prefix = " - ".join(entry.destination.stem.split(" - ")[:2])
     target_coverage = coverage(entry.destination)
-    return any(path != entry.source and path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS
+    return any(path != entry.source and path not in ignored and path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS
                and (path.stem == prefix or path.stem.startswith(prefix + " - ") or
                     overlaps(entry.destination, path) or
                     (target_coverage and len(target_coverage[1]) > 1 and coverage(path) is None))
                for path in parent.iterdir())
 
 
-def _validate_entry(entry: PlanEntry, config: Config, workflow: str) -> None:
+def _validate_entry(entry: PlanEntry, config: Config, workflow: str, *, mode="move", links=None) -> None:
     expected_source, expected_destination = configured_roots(config, entry.kind, workflow)
     if entry.source_root != expected_source or entry.destination_root != expected_destination:
         raise UnsafePath("plan roots no longer match configuration")
@@ -69,8 +69,21 @@ def _validate_entry(entry: PlanEntry, config: Config, workflow: str) -> None:
             with parent_fd(source_root, source_relative) as (descriptor, name):
                 assert_state(descriptor, name, file)
             if file.source != file.destination and (file.destination.exists() or file.destination.is_symlink()):
-                raise FileExistsError(f"destination exists: {file.destination}")
-    if _release_conflict(entry):
+                if mode != "hardlink" or links is None or links.owned(file, entry.source_root, entry.destination_root) is None:
+                    raise FileExistsError(f"destination exists: {file.destination}")
+            if mode == "hardlink" or (links is not None and workflow == "audit" and links.protected(file)):
+                relative = relative_file(file.destination, entry.destination_root)
+                while True:
+                    try:
+                        with parent_fd(destination_root, relative) as (descriptor, _):
+                            if os.fstat(descriptor).st_dev != file.device:
+                                raise OSError(errno.EXDEV, "hard links require the same filesystem")
+                        break
+                    except FileNotFoundError:
+                        relative = relative.parent
+    ignored = {file.destination for file in entry.files if mode == "hardlink" and links is not None and
+               links.owned(file, entry.source_root, entry.destination_root) is not None}
+    if _release_conflict(entry, ignored):
         raise FileExistsError(f"possible duplicate release: {entry.destination}")
 
 
@@ -192,7 +205,11 @@ def apply_plan(plan: SavedPlan, config: Config, transaction_root: Path,
 
 def _apply_plan(plan: SavedPlan, config: Config, transaction_root: Path,
                 *, auto_threshold: float | None = None) -> tuple[Transaction, dict[str, int]]:
+    plan = SavedPlan.model_validate(plan.model_dump(mode="json"))
     transaction = Transaction(transaction_root, plan.plan_id)
+    transaction.data["transfer_mode"] = plan.transfer_mode
+    from jellyorganize.filesystem.links import LinkedImports
+    links = LinkedImports(config)
     if auto_threshold is not None:
         transaction.data["auto_threshold"] = auto_threshold
         transaction.write()
@@ -204,14 +221,21 @@ def _apply_plan(plan: SavedPlan, config: Config, transaction_root: Path,
             continue
         record = {"operation": plan.workflow, "source": str(entry.source), "destination": str(entry.destination), "kind": entry.kind,
                   "candidate": entry.candidate.model_dump(mode="json") if entry.candidate else None,
-                  "files": [], "status": "started", "moves": []}
+                  "files": [], "status": "started", "moves": [], "transfer_mode": plan.transfer_mode}
         transaction.append(record)
         moved: list[FileState] = []
         try:
-            _validate_entry(entry, config, plan.workflow)
+            _validate_entry(entry, config, plan.workflow, mode=plan.transfer_mode, links=links)
             ordered = [*entry.files[1:], entry.files[0]]
-            record["moves"] = [new_receipt(file, entry.source_root, entry.destination_root)
+            record["moves"] = [new_receipt(file, entry.source_root, entry.destination_root, plan.transfer_mode,
+                                          link_only=plan.workflow == "audit" and links.protected(file))
                                for file in ordered if file.source != file.destination]
+            if plan.transfer_mode == "hardlink":
+                for receipt in record["moves"]:
+                    file = FileState.model_validate(receipt["source_state"])
+                    owned = links.owned(file, entry.source_root, entry.destination_root)
+                    if owned is not None:
+                        receipt.update(destination_state=owned.model_dump(mode="json"), reused=True)
             transaction.write()
             # Sidecars first: a failure leaves the media file at its source.
             for file in ordered:
@@ -227,7 +251,8 @@ def _apply_plan(plan: SavedPlan, config: Config, transaction_root: Path,
                 moved.append(reversed_state)
                 record["files"].append({"source": str(file.source), "destination": str(file.destination),
                                         "source_state": file.model_dump(mode="json"),
-                                        "destination_state": reversed_state.model_dump(mode="json"), "status": "moved"})
+                                        "destination_state": reversed_state.model_dump(mode="json"), "status": "moved",
+                                        "reused": receipt.get("reused", False)})
                 transaction.write()
             record["status"] = "applied"
             transaction.write()
@@ -250,7 +275,11 @@ def _apply_plan(plan: SavedPlan, config: Config, transaction_root: Path,
                 for reversed_state in reversed(moved):
                     try:
                         receipt = next(move for move in record["moves"] if move["source_state"]["source"] == str(reversed_state.destination))
-                        rollback = receipt["rollback"] = new_receipt(reversed_state, entry.destination_root, entry.source_root)
+                        if receipt.get("reused"):
+                            continue
+                        rollback = receipt["rollback"] = new_receipt(reversed_state, entry.destination_root, entry.source_root,
+                                                                     "unlink" if plan.transfer_mode == "hardlink" else "move",
+                                                                     link_only=receipt.get("link_only", False))
                         with journal_move(transaction, rollback):
                             _move_file(reversed_state, entry.destination_root, entry.source_root, config)
                         receipt["phase"] = "rolled_back"

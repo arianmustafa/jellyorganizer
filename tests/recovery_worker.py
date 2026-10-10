@@ -34,6 +34,13 @@ def main():
     durable.checkpoint = crash
     apply.checkpoint = crash
     undo.checkpoint = crash
+    if payload.get("publication_failure"):
+        publish = durable.rename_noreplace
+        def fail_publication(parent, source, destination):
+            if destination.endswith(".mkv"):
+                raise OSError("injected publication failure")
+            return publish(parent, source, destination)
+        durable.rename_noreplace = fail_publication
     if payload.get("copy"):
         def different_filesystem(*args, **kwargs):
             raise OSError(errno.EXDEV, "force copy branch")

@@ -13,6 +13,12 @@ from jellyorganize.scanner.sidecars import MEDIA_EXTENSIONS
 async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, identities=None, skip_paths=None) -> list[Proposal]:
     proposals: list[Proposal] = []
     skip_paths = skip_paths or set()
+    from jellyorganize.filesystem.links import LinkedImports
+    from jellyorganize.filesystem.safety import UnsafePath
+    from jellyorganize.filesystem.apply import _release_conflict
+    from jellyorganize.planning.store import entry_from_proposal
+    links = LinkedImports(config)
+    repairs = set()
     for item in scan.items:
         if item.path in skip_paths:
             proposals.append(Proposal(item, "SKIP", "skipped for this plan"))
@@ -24,6 +30,23 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
             status = ("ERROR" if item.reason.startswith("completion check failed:") else
                       "REVIEW" if item.reason.startswith("media type is ambiguous") else "SKIP")
             proposals.append(Proposal(item, status, item.reason))
+            continue
+        try:
+            linked = links.package(item)
+        except (OSError, UnsafePath) as error:
+            proposals.append(Proposal(item, "CONFLICT", f"retained hard-link import changed: {error}"))
+            continue
+        if linked is not None:
+            entry, targets, complete = linked
+            if complete:
+                proposals.append(Proposal(item, "SKIP", "already hard-linked; originals retained"))
+            elif config.filesystem.mode != "hardlink":
+                proposals.append(Proposal(item, "CONFLICT", "tracked hard-link destination missing; enable hardlink mode to repair"))
+            else:
+                proposals.append(Proposal(item, "CONFIRMED", "repair missing links using saved identity", entry.confidence,
+                                          entry.candidate, targets[item.path],
+                                          {source: target for source, target in targets.items() if source != item.path}))
+                repairs.add(item.path)
             continue
         candidate, confidence, reason, choices, episode_title, canonical_episodes = await resolve(
             item, tmdb, tvmaze if config.providers.tvmaze else None, identities,
@@ -50,6 +73,10 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
     for proposal in proposals:
         if proposal.destination is None:
             continue
+        owned = set()
+        if proposal.item.path in repairs:
+            entry = entry_from_proposal(proposal, config)
+            owned = {file.destination for file in entry.files if links.owned(file, entry.source_root, entry.destination_root)}
         paths = [proposal.destination, *proposal.sidecar_destinations.values()]
         release_key = (proposal.destination.parent if proposal.item.kind == "movie"
                        else (proposal.destination.parent, " - ".join(proposal.destination.stem.split(" - ")[:2])))
@@ -67,7 +94,9 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
                 (overlaps(proposal.destination, path) or
                  (target_coverage and len(target_coverage[1]) > 1 and coverage(path) is None))
                 for path in proposal.destination.parent.iterdir()))
-        if len(paths) != len(set(paths)) or any(path.exists() for path in paths) or duplicate:
+        if proposal.item.path in repairs:
+            duplicate = _release_conflict(entry, owned)
+        if len(paths) != len(set(paths)) or any(path.exists() for path in paths if path not in owned) or duplicate:
             proposal.status = "CONFLICT"
             proposal.reason = "destination exists, duplicate media, or sidecar names collide"
         if release_key in releases:

@@ -18,6 +18,11 @@ from jellyorganize.scanner.incoming import scan_incoming
 from jellyorganize.scanner.sidecars import MEDIA_EXTENSIONS
 
 
+def validate_handoff(plan, config):
+    from jellyorganize.filesystem.links import LinkedImports
+    _validate_entry(plan.entries[0], config, 'handoff', mode=plan.transfer_mode, links=LinkedImports(config))
+
+
 def torrent_hash(value):
     if not re.fullmatch(r'(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})', value):
         raise DownloadError('torrent ID must be a 40- or 64-character hexadecimal hash')
@@ -142,9 +147,32 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                 expected_source, expected_destination = configured_roots(config, 'download', 'handoff')
                 if plan.source_roots != {'download': expected_source} or plan.destination_roots != {'download': expected_destination}:
                     raise DownloadError('previous handoff roots no longer match configuration')
+                if plan.transfer_mode == 'hardlink':
+                    torrent, files = client.torrent(torrent_id, include_files=True)
+                    if Path(torrent.get('content_path', '')) != plan.download_source:
+                        raise DownloadError('torrent content path changed after handoff was planned')
+                    current = {state.source: state for state in file_states(torrent, files, config)}
+                    expected = {state.source: state for entry in plan.entries for state in entry.files}
+                    if set(current) != set(expected):
+                        raise DownloadError('torrent file selection changed after the previous handoff')
+                    if current != expected:
+                        raise DownloadError('download changed after the previous handoff')
                 complete = row[2] == 'handed_off'
                 transaction_id = row[1]
                 attempted = None
+                if complete and transaction_id:
+                    completed = Transaction.load(root, transaction_id)
+                    if any(item.get('status') != 'applied' for item in completed.data['items']):
+                        complete, attempted = False, completed
+                    elif plan.transfer_mode == 'hardlink':
+                        from jellyorganize.filesystem.apply import _check_unchanged
+                        from jellyorganize.filesystem.links import LinkedImports
+                        links = LinkedImports(config)
+                        for entry in plan.entries:
+                            for file in entry.files:
+                                _check_unchanged(file, entry.source_root)
+                                if links.owned(file, entry.source_root, entry.destination_root) is None:
+                                    complete, attempted = False, completed
                 # A process can die after committing moves but before the index.
                 if not complete:
                     for path in sorted(root.glob('*.json')):
@@ -154,6 +182,12 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                             continue
                         attempted = journal
                         if data['items'] and all(item.get('status') == 'applied' for item in data['items']):
+                            if plan.transfer_mode == 'hardlink':
+                                from jellyorganize.filesystem.links import LinkedImports
+                                links = LinkedImports(config)
+                                if not all(links.owned(file, entry.source_root, entry.destination_root) is not None
+                                           for entry in plan.entries for file in entry.files):
+                                    continue
                             complete, transaction_id = True, data['transaction_id']
                             break
                 if complete:
@@ -167,8 +201,10 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                     torrent, files = client.torrent(torrent_id, include_files=True)
                     stopped_complete(torrent)
                     states = retry_states(plan, attempted, file_states(torrent, files, config))
-                    plan = store.create_handoff(states, config, torrent_id, config.qbittorrent.url, plan.download_source)
-                    _validate_entry(plan.entries[0], config, 'handoff')
+                    frozen = config.model_copy(deep=True)
+                    frozen.filesystem.mode = plan.transfer_mode
+                    plan = store.create_handoff(states, frozen, torrent_id, config.qbittorrent.url, plan.download_source)
+                    validate_handoff(plan, config)
                     connection.execute('UPDATE handoffs SET plan_id=? WHERE client=? AND hash=?',
                                        (plan.plan_id, config.qbittorrent.url, torrent_id))
                     connection.commit()
@@ -179,7 +215,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                 if not states:
                     return None, {'status': 'no selected media files; untouched', 'transaction_id': None}
                 plan = store.create_handoff(states, config, torrent_id, config.qbittorrent.url, Path(torrent['content_path']))
-                _validate_entry(plan.entries[0], config, 'handoff')
+                validate_handoff(plan, config)
                 if dry_run:
                     verify_torrent(plan, config, client=client)
                     return plan, {'status': 'dry run; untouched', 'transaction_id': None}
@@ -187,7 +223,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                                    (config.qbittorrent.url, torrent_id, plan.plan_id, 'planned'))
                 connection.commit()  # Index exact decisions before any file moves.
             if dry_run:
-                _validate_entry(plan.entries[0], config, 'handoff')
+                validate_handoff(plan, config)
                 verify_torrent(plan, config, client=client)
                 return plan, {'status': 'dry run; untouched', 'transaction_id': None}
             verify_torrent(plan, config, client=client)
