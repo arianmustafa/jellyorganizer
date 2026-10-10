@@ -69,8 +69,25 @@ def external_id_agreement(tmdb_imdb: str | None, tmdb_tvdb: int | None,
     return "match" if comparisons else "absent"
 
 
+def movie_filename_title(item: MediaItem) -> str | None:
+    title = item.hints.get("title")
+    group = item.hints.get("release_group")
+    folder = item.hints.get("folder_title") or item.hints.get("package_title")
+    folder_year = item.hints.get("folder_year") or item.hints.get("package_year")
+    # GuessIt can treat the first half of a hyphenated title as a leading
+    # release group. Restore it only when the folder independently supplies
+    # the entire title and the same year, never from a search result alone.
+    if (item.kind == "movie" and title and group and folder and folder_year and
+            folder_year == item.hints.get("year") and
+            item.path.name.casefold().startswith(str(group).casefold() + "-")):
+        restored = f"{group}-{title}"
+        if normalize(restored) == normalize(str(folder)):
+            return str(folder)
+    return str(title) if title else None
+
+
 def local_title_year(item: MediaItem) -> tuple[str | None, int | None]:
-    title = item.hints.get("folder_title") or item.hints.get("title") or item.hints.get("package_title")
+    title = item.hints.get("folder_title") or movie_filename_title(item) or item.hints.get("package_title")
     year = item.hints.get("folder_year") or item.hints.get("year") or item.hints.get("package_year")
     return (str(title) if title else None, int(year) if year else None)
 
@@ -89,7 +106,7 @@ async def _resolve_base(item: MediaItem, tmdb, tvmaze=None, identities=None, *, 
     if not title and not explicit_id and not stored_candidate:
         return None, 0, "no usable title", [], None
     if not explicit_id and not stored_candidate and item.kind == "movie":
-        filename_title = item.hints.get("title")
+        filename_title = movie_filename_title(item)
         if item.hints.get("folder_title") and filename_title and normalize(str(filename_title)) != normalize(title):
             return None, 0, "folder title conflicts with filename", [], None
     try:
