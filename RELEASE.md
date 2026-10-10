@@ -1,4 +1,26 @@
-# 1.0 release validation
+# Release validation
+
+## 1.1.0 — 2026-10-10
+
+Version **1.1.0** adds optional hard-link imports and folder-corroborated recovery
+of hyphenated movie titles misparsed as release groups. Move mode remains the
+default. Hard-link mode retains originals in both downloader and Incoming
+imports; all locations must share a filesystem. Undo removes only verified
+links owned by the transaction.
+
+Local Python 3.13 validation passed 314 tests, including link publication,
+interrupted apply/undo/rollback, missing-link repair, repeated imports, audit
+relocations, legacy plans, and the reported Spider-Man filename. Conflicting
+folder years, ambiguous searches, and mismatched provider details remain for
+review. The frozen corpus passed all 40 cases with zero wrong automatic matches.
+Storage validation passed 18 abrupt interruption checks and 25 repeat cycles;
+the Incoming soak passed three cycles. A clean installed wheel passed hard-link
+apply/undo and packaged configuration checks.
+
+These local storage checks used one physical filesystem. Unsupported-link and
+cross-filesystem failures are covered by fault injection; the tagged GitHub
+workflow also validates Python 3.13 and 3.14 before creating release artifacts.
+The following 1.0 measurements describe the previous release.
 
 Version **1.0.0** targets Linux with Python 3.13 or newer. Validation uses synthetic files in isolated directories. It does not organize an existing library or modify real torrents. Optional systemd support is tested but is not required for manual organization or Qui hooks.
 

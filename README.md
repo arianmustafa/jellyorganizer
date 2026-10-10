@@ -5,12 +5,12 @@
 # Jellyorganize
 
 [![CI](https://github.com/arianmustafa/jellyorganizer/actions/workflows/release.yml/badge.svg)](https://github.com/arianmustafa/jellyorganizer/actions/workflows/release.yml)
-[![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-7c3aed)](https://github.com/arianmustafa/jellyorganizer/releases)
+[![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-7c3aed)](https://github.com/arianmustafa/jellyorganizer/releases)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#install-and-configure)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-Automatically organize completed movies and TV episodes from Incoming into Jellyfin libraries. Run `jellyorganize organize`, or schedule `jellyorganize run`; strong matches move immediately. Uncertain files stay in Incoming while other files proceed. No routine audit, review, or apply step is required. Existing Movies and TV libraries are repaired only through an explicit `audit` command.
+Automatically organize completed movies and TV episodes from Incoming into Jellyfin libraries. Run `jellyorganize organize`, or schedule `jellyorganize run`; strong matches move immediately by default. Optional hard-link mode retains originals without duplicating file data. Uncertain files stay in Incoming while other files proceed. No routine audit, review, or apply step is required. Existing Movies and TV libraries are repaired only through an explicit `audit` command.
 
 Version 1.0 adds durable recovery, completion tracking, persistent exceptions, strict TOML configuration, optional qBittorrent/Qui automation, and a reproducible matching benchmark. Linux and Python 3.13+ are required. No root access is needed.
 
@@ -20,7 +20,7 @@ Install the wheel on the media host in a virtual environment. For a new installa
 
 ```bash
 uv venv --python 3.13 ~/.venvs/jellyorganize
-uv pip install --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.0.0-py3-none-any.whl
+uv pip install --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.1.0-py3-none-any.whl
 source ~/.venvs/jellyorganize/bin/activate
 jellyorganize config init
 ```
@@ -28,7 +28,7 @@ jellyorganize config init
 For an existing installation, retain its configuration and state directories and upgrade the same environment:
 
 ```bash
-uv pip install --upgrade --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.0.0-py3-none-any.whl
+uv pip install --upgrade --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.1.0-py3-none-any.whl
 ```
 
 Alternatively, use `python3 -m venv` and the environment's `pip`.
@@ -38,9 +38,9 @@ Release files are available from this repository's [GitHub Releases](https://git
 For an isolated CLI installation, install a downloaded wheel with either:
 
 ```bash
-uv tool install --python 3.13 ./jellyorganize-1.0.0-py3-none-any.whl
+uv tool install --python 3.13 ./jellyorganize-1.1.0-py3-none-any.whl
 # Or, with Python 3.13+ available:
-pipx install --python python3.13 ./jellyorganize-1.0.0-py3-none-any.whl
+pipx install --python python3.13 ./jellyorganize-1.1.0-py3-none-any.whl
 ```
 
 From a source checkout, activate a Python 3.13+ virtual environment and install dependencies with `python -m pip install -e .`. You can then run `python -m jellyorganize.cli organize` directly. Both forms use the same configuration and workflow. No Docker image or standalone binary is provided.
@@ -80,7 +80,7 @@ interval_seconds = 300
 credential_file = "~/.local/share/jellyorganize/tmdb.token"
 ```
 
-Directories must already exist. Commands that load configuration do not create media directories. Previous configurations containing `[movies].incoming` or `[tv].incoming` continue to use separate Incoming folders unless `[incoming].path` is explicitly set. The obsolete `matching.review_threshold` setting is accepted with a migration warning; remove it. Configurations and saved plans use schema version 1. New journals use version 2, while completed legacy journals remain usable for undo.
+Directories must already exist. Commands that load configuration do not create media directories. Previous configurations containing `[movies].incoming` or `[tv].incoming` continue to use separate Incoming folders unless `[incoming].path` is explicitly set. The obsolete `matching.review_threshold` setting is accepted with a migration warning; remove it. Configurations use schema version 1. New saved plans use version 2 and new journals use version 3 to record transfer mode. Older plans and journals retain move semantics, including recovery and undo.
 
 ## Download completion
 
@@ -95,6 +95,47 @@ Choose the policy that fits your downloader:
 The minimum age and temporary-file checks apply to all modes. Temporary extensions include `.part`, `.partial`, `.tmp`, and `.crdownload`. Stability is a heuristic: a paused downloader can look stable. Use `marker` or atomic `handoff` when your downloader can give an explicit completion signal. A first scheduled `run` usually records observations; `organize` can observe and organize in one invocation. Files changed during the wait remain untouched until a later invocation.
 
 In a shared Incoming folder, season/episode codes route files to TV, while a movie year without episode codes routes to movies. Ambiguous media types, ambiguous sidecars, extras, duplicates, and incomplete packages remain untouched. Associated subtitles and other supported sidecars move with their media.
+
+## Hard-link imports
+
+To keep original files in Incoming and qBittorrent downloads, set:
+
+```toml
+[filesystem]
+mode = "hardlink"
+```
+
+The default is `mode = "move"`. Hard-link mode creates library entries sharing
+the original files' data, including associated subtitles. Downloads → Incoming
+and Incoming → Movies/TV both retain their source paths. All participating paths
+must be on compatible mounts of the same filesystem. If hard links are unavailable,
+the import fails while preserving originals; it never falls back to copying.
+`config show`, `config check`, and `organize --dry-run` display the chosen mode.
+
+Hard links are independent filenames for the same file data: editing through any
+name changes every linked name. Removing a name preserves the data while another
+link remains. Files still need to satisfy the selected completion policy, and
+qBittorrent imports still require fully downloaded, stopped torrents. Retained
+download paths can be used for seeding after the import finishes.
+
+Repeated runs recognize unchanged completed links and skip them without reporting
+duplicate conflicts. Missing links can be repaired from the retained original and
+saved identity. Changed originals, replacement destinations, and newly added
+companions undergo checks again; existing data is never overwritten.
+
+Recovery and undo use the mode saved with the operation, even if the configuration
+later changes. Hard-link undo removes only links created by that transaction after
+verifying the surviving original and file state. A repair transaction leaves links
+that were already present alone. If a source is missing or altered, undo preserves
+the destination for inspection. A later scheduled run can recreate undone links
+while their originals remain in Incoming; remove those files from Incoming to keep
+them out of subsequent imports.
+
+`audit` continues to relocate library filenames. Tracked hard links must remain on
+compatible mounts during audit, and scheduled imports follow recorded audit
+relocations instead of recreating obsolete names. Undo an audit before undoing the
+original import. For downloader imports, undo the library import first and the
+downloads → Incoming handoff second.
 
 ## Unattended operation and credentials
 
@@ -125,7 +166,7 @@ On hosts where you choose systemd, `service show` displays the optional generate
 
 ## qBittorrent and Qui automation
 
-The optional hook checks qBittorrent's current state, moves a fully downloaded **stopped** torrent into Incoming, then automatically organizes eligible media. It retains the torrent entry and never sends torrent deletion, stop, or resume requests. Seeding torrents remain untouched. Configure your seeding policy separately so qBittorrent stops torrents when the desired ratio or time is reached; download completion alone does not trigger handoff.
+The optional hook checks qBittorrent's current state, imports a fully downloaded **stopped** torrent into Incoming, then automatically organizes eligible media. It moves files by default or retains originals with hard links when `filesystem.mode = "hardlink"`. It retains the torrent entry and never sends torrent deletion, stop, or resume requests. Seeding torrents remain untouched. Configure your seeding policy separately so qBittorrent stops torrents when the desired ratio or time is reached; download completion alone does not trigger handoff.
 
 Add these sections to your configuration, replacing the examples with your own paths and API address:
 
@@ -170,7 +211,7 @@ Incoming/Show/Season 2/Show.S02E03.mkv
 TV Shows/Show (year) [tmdbid-ID]/Season 02/…mkv
 ```
 
-Selected subtitles and release files retain their relative paths into Incoming. Supported sidecars then follow their media into the library; unknown notes or ambiguous media stay in Incoming. Unselected files remain in downloads, and empty directories are retained. The kept torrent entry points at its old download paths and may display missing files after a recheck; resuming it requires undoing the moves first. To undo the whole workflow, undo the organization transaction, then the handoff transaction. The hook prints both transaction IDs as JSON.
+Selected subtitles and release files retain their relative paths into Incoming. Supported sidecars then follow their media into the library; unknown notes or ambiguous media stay in Incoming. Unselected files remain in downloads, and empty directories are retained. In move mode, the kept torrent entry points at its old download paths and may display missing files after a recheck; resuming it requires undoing the moves first. Hard-link mode preserves those download paths. To undo the whole workflow, undo the organization transaction, then the handoff transaction. The hook prints both transaction IDs as JSON.
 
 For manual testing, use `import-download --torrent HASH --dry-run`; `--handoff-only` moves into Incoming without organizing. The qBittorrent API and filesystem cannot be locked together: do not resume a torrent while its handoff is running.
 
@@ -186,7 +227,7 @@ Run `jellyorganize benchmark` for the packaged 40-case frozen regression corpus.
 
 ## Recovery and undo
 
-Every apply saves an immutable plan and writes durable file receipts before moving data. Copies are staged under hidden `.jellyorganize-*.part` names, verified with a full content hash, and published without overwriting. Source removal occurs after destination publication and directory synchronization. Apply, undo, and recovery share a media lock.
+Every apply saves an immutable plan and writes durable file receipts before transferring files. Links and copies are staged under hidden `.jellyorganize-*.part` names and published without overwriting; cross-filesystem copies receive full content-hash verification. In move mode, source removal occurs after destination publication and directory synchronization. Hard-link mode retains sources. Apply, undo, and recovery share a media lock.
 
 An automatic run first resumes interrupted transactions using their saved decisions, without guessing identities again. Run `jellyorganize recover` explicitly to see recovery results. Changed files, occupied paths, altered roots, or incomplete legacy journals block unsafe recovery and preserve data. Correct the reported condition before retrying. Unknown staging files are preserved when ownership cannot be established; inspect these rather than deleting them blindly. The guarantee depends on the filesystem honoring synchronization; power-loss behavior on other storage types has not been validated.
 
@@ -194,7 +235,7 @@ An automatic run first resumes interrupted transactions using their saved decisi
 jellyorganize undo TRANSACTION_ID
 ```
 
-Undo verifies recorded file state, restores media and sidecars, refuses changed files or occupied original paths, and writes its own recoverable journal. Repeated completed undo is harmless. Keep the original plan and all related journals. Empty directories are retained. Configured roots and paths beneath them cannot be symlinks; a symlink in an ancestor of a root is supported.
+Undo verifies recorded file state, restores moved media and sidecars or removes created hard links, and writes its own recoverable journal. It refuses changed files, occupied restoration paths, and missing retained originals. Repeated completed undo is harmless. Keep the original plan and all related journals. Empty directories are retained. Configured roots and paths beneath them cannot be symlinks; a symlink in an ancestor of a root is supported.
 
 State is stored under `~/.local/state/jellyorganize/`, identities under `~/.local/share/jellyorganize/`, and metadata cache under `~/.cache/jellyorganize/`; XDG overrides are supported. Do not share a state directory between independent hosts or configurations.
 

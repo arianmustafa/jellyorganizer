@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jellyorganize"
-version = "1.0.0"
+version = "1.1.0"
 description = "Automatic Incoming organization and reversible media moves for Jellyfin"
 readme = "README.md"
 license = "MIT"

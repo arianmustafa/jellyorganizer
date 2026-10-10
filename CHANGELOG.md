@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 — 2026-10-10
+
+- Add optional `filesystem.mode = "hardlink"` for Incoming and qBittorrent imports.
+  Original media and companion files remain in place and share data with library
+  entries. Unsupported or cross-filesystem links fail without copying.
+- Record transfer mode in saved plans and journals; make link publication,
+  rollback, recovery, and undo restartable while retaining legacy move behavior.
+- Recognize completed links on repeated runs, repair missing links, and follow
+  recorded library audits without recreating obsolete names.
+- Restore a hyphenated movie title when GuessIt misreads its leading word as a
+  release group and the containing folder corroborates the full title and year.
+  Keep ambiguous searches and conflicting provider details unresolved.
+
 ## 1.0.0 — 2026-10-05
 
 * Organize completed Incoming movies and TV automatically; unresolved items remain while unrelated strong matches proceed.
