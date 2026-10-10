@@ -5,7 +5,7 @@
 # Jellyorganize
 
 [![CI](https://github.com/arianmustafa/jellyorganizer/actions/workflows/release.yml/badge.svg)](https://github.com/arianmustafa/jellyorganizer/actions/workflows/release.yml)
-[![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-7c3aed)](https://github.com/arianmustafa/jellyorganizer/releases)
+[![Version 1.2.0](https://img.shields.io/badge/version-1.2.0-7c3aed)](https://github.com/arianmustafa/jellyorganizer/releases)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](#install-and-configure)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
@@ -20,7 +20,7 @@ Install the wheel on the media host in a virtual environment. For a new installa
 
 ```bash
 uv venv --python 3.13 ~/.venvs/jellyorganize
-uv pip install --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.1.0-py3-none-any.whl
+uv pip install --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.2.0-py3-none-any.whl
 source ~/.venvs/jellyorganize/bin/activate
 jellyorganize config init
 ```
@@ -28,7 +28,7 @@ jellyorganize config init
 For an existing installation, retain its configuration and state directories and upgrade the same environment:
 
 ```bash
-uv pip install --upgrade --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.1.0-py3-none-any.whl
+uv pip install --upgrade --python ~/.venvs/jellyorganize/bin/python ./jellyorganize-1.2.0-py3-none-any.whl
 ```
 
 Alternatively, use `python3 -m venv` and the environment's `pip`.
@@ -38,9 +38,9 @@ Release files are available from this repository's [GitHub Releases](https://git
 For an isolated CLI installation, install a downloaded wheel with either:
 
 ```bash
-uv tool install --python 3.13 ./jellyorganize-1.1.0-py3-none-any.whl
+uv tool install --python 3.13 ./jellyorganize-1.2.0-py3-none-any.whl
 # Or, with Python 3.13+ available:
-pipx install --python python3.13 ./jellyorganize-1.1.0-py3-none-any.whl
+pipx install --python python3.13 ./jellyorganize-1.2.0-py3-none-any.whl
 ```
 
 From a source checkout, activate a Python 3.13+ virtual environment and install dependencies with `python -m pip install -e .`. You can then run `python -m jellyorganize.cli organize` directly. Both forms use the same configuration and workflow. No Docker image or standalone binary is provided.

@@ -1,5 +1,29 @@
 # Release validation
 
+## 1.2.0 — 2026-10-10
+
+Version **1.2.0** allows hard-link imports of completed seeding torrents and adds
+saved matching explanations, opt-in movie versions, filesystem probes, optional
+JSON webhooks, and targeted Jellyfin refreshes. Move mode and the new optional
+integrations retain conservative defaults. Notifications and refreshes use
+durable retry records; refresh intent survives an interruption after media commit.
+
+Local Python 3.13 validation passed 369 tests. Coverage includes seeding and
+incomplete-state checks, movie version collisions,
+subtitles and undo, offline explanations, disposable filesystem probes, private
+credentials, alert deduplication, server failures, and crash-safe refresh retries.
+The frozen matching corpus has 40 cases with zero wrong automatic matches.
+Storage validation passed 18 abrupt interruption checks and 25 repeated cycles;
+the Incoming soak passed three cycles. Package smoke checks exercised the bundled
+configuration, matching corpus, filesystem probes, and webhook delivery.
+
+External integrations use simulated qBittorrent, webhook, and Jellyfin responses;
+these checks do not claim validation against an operator's live servers. Local
+storage checks use one physical filesystem, with unsupported-link and
+cross-filesystem failures covered by fault injection. The tagged GitHub workflow
+validates Python 3.13 and 3.14 and clean wheel installation before producing the
+release assets. The following sections retain measurements for earlier releases.
+
 ## 1.1.0 — 2026-10-10
 
 Version **1.1.0** adds optional hard-link imports and folder-corroborated recovery
@@ -49,7 +73,7 @@ The Arrival fixture was corrected after live verification found two distinct TMD
 
 The qBittorrent adapter and Qui hook are tested with synthetic API responses, including login, proxy authentication, API prefixes, active torrent rejection, file selection, and shared paths. A live API rejecting unauthenticated requests still needs the operator's credentials before activation. The release does not change authentication settings, seeding limits, installed applications, or Qui rules on the validation host.
 
-Configure the generic sections in [config.example.toml](config.example.toml), save credentials with `credentials`, and run `config check --download-client`. Register the executable and the stopped/completed rule in Qui as documented in [README.md](README.md). Test a selected torrent with `import-download --torrent HASH --dry-run` before enabling its automatic rule.
+Configure the generic sections in [config.example.toml](config.example.toml), save credentials with `credentials`, and run `config check --download-client`. Register the executable and a completed-torrent rule in Qui as documented in [README.md](README.md); move mode additionally requires stopped torrents. Test a selected torrent with `import-download --torrent HASH --dry-run` before enabling its automatic rule.
 
 ## GitHub release workflow
 

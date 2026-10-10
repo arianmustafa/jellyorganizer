@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 — 2026-10-10
+
+- Import completed qBittorrent torrents while they continue seeding in hard-link
+  mode; move mode still requires stopped torrents.
+- Save parsed titles, effective matching hints, and candidate comparisons in
+  plans. Show evidence during review and with the offline `explain` command.
+- Add opt-in movie versions with resolution, edition, or explicit labels using
+  Jellyfin's naming layout. Preserve duplicate checks, subtitles, and undo.
+- Add `doctor` to probe directory access and actual hard-link support, cleaning
+  up disposable probe files afterward.
+- Add optional JSON webhooks for new or changed exceptions and failures, with
+  private credentials, durable retries, and deduplicated alerts.
+- Notify Jellyfin of successful library imports and repairs using targeted path
+  updates, optional server mount mapping, and crash-safe retries. Server failures
+  leave imports intact; retry with `integrations` or the next automatic run.
+
 ## 1.1.0 — 2026-10-10
 
 - Add optional `filesystem.mode = "hardlink"` for Incoming and qBittorrent imports.
