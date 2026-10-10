@@ -145,7 +145,8 @@ class PlanStore:
                          download_hash=torrent_id, downloader_url=downloader_url, download_source=content_path,
                          entries=[PlanEntry(source=states[0].source, kind="download", source_root=source_root,
                                             destination_root=destination_root, status="CONFIRMED", confidence=1.0,
-                                            reason="qBittorrent confirms complete, stopped download; preserve nested paths",
+                                            reason="qBittorrent confirms complete download; preserve nested paths" +
+                                            (" and retain seeding originals" if config.filesystem.mode == "hardlink" else "; torrent stopped"),
                                             destination=states[0].destination, files=states,
                                             source_states=[SourceState.model_validate(state.model_dump()) for state in states])])
         return self.save(plan)

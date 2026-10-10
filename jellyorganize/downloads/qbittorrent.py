@@ -98,8 +98,8 @@ class QBittorrentClient:
                     raise DownloadError('malformed qBittorrent file response')
             return rows[0], files
 
-    def assert_no_active_overlap(self, torrent_id, paths, root):
-        """Another torrent sharing these paths must not still be seeding."""
+    def assert_no_active_overlap(self, torrent_id, paths, root, *, allow_seeding=False):
+        """Shared paths may be read by seeders only when originals are retained."""
         from jellyorganize.downloads.handoff import local_path
         with self.session() as client:
             response = self.request(client, 'GET', 'torrents/info')
@@ -120,19 +120,23 @@ class QBittorrentClient:
                     continue
                 if any(path == content or content in path.parents for path in paths):
                     try:
-                        stopped_complete(row)
+                        stopped_complete(row, allow_seeding=allow_seeding)
                     except DownloadError:
                         raise DownloadError('another active or incomplete torrent shares the handoff paths; files are untouched') from None
 
 
-def stopped_complete(torrent, *, recovering=False):
+def stopped_complete(torrent, *, recovering=False, allow_seeding=False):
     if torrent is None:
         raise DownloadError('torrent is absent from qBittorrent; the stopped entry must be retained')
     states = {'pausedUP', 'stoppedUP'}
+    if allow_seeding:
+        states.update({'uploading', 'stalledUP', 'queuedUP', 'forcedUP'})
     # A partially moved, previously stopped torrent can be reported missing.
     # This state is permitted only while resuming a journal with moved files.
     if recovering:
         states.add('missingFiles')
     if (torrent.get('state') not in states or type(torrent.get('progress')) not in (int, float) or
             torrent['progress'] != 1 or type(torrent.get('amount_left')) is not int or torrent['amount_left'] != 0):
+        if allow_seeding:
+            raise DownloadError('torrent must be fully downloaded and stopped or seeding; checking and incomplete torrents are untouched')
         raise DownloadError('torrent must be fully downloaded and stopped after seeding; active, checking, and incomplete torrents are untouched')

@@ -17,7 +17,7 @@ def main():
     if payload.get('download_files'):
         from jellyorganize.downloads import handoff
         class Client:
-            def assert_no_active_overlap(self, torrent_id, paths, root):
+            def assert_no_active_overlap(self, torrent_id, paths, root, *, allow_seeding=False):
                 pass
             def torrent(self, torrent_id, *, include_files=False):
                 return payload['torrent'], payload['download_files'] if include_files else []

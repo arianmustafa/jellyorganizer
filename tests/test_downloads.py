@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from jellyorganize.downloads.handoff import import_torrent, file_states
-from jellyorganize.downloads.qbittorrent import QBittorrentClient, DownloadError
+from jellyorganize.downloads.qbittorrent import QBittorrentClient, DownloadError, stopped_complete
 from jellyorganize.filesystem.undo import undo_transaction
 from jellyorganize.config import QBittorrent
 
@@ -18,7 +18,7 @@ class TorrentClient:
     def __init__(self, config, files, state='stoppedUP'):
         self.config, self.files, self.state = config, files, state
         self.calls = 0
-    def assert_no_active_overlap(self, torrent_id, paths, root):
+    def assert_no_active_overlap(self, torrent_id, paths, root, *, allow_seeding=False):
         assert torrent_id == HASH
     def torrent(self, torrent_id, *, include_files=False):
         assert torrent_id == HASH
@@ -346,3 +346,39 @@ def test_another_torrent_sharing_paths_must_also_be_stopped(tmp_path, state, blo
         client.assert_no_active_overlap(HASH, [root / 'Shared' / 'episode.mkv'], root)
     rows[0]['state'] = 'uploading'
     client.assert_no_active_overlap(HASH, [root / 'Different' / 'episode.mkv'], root)
+
+
+@pytest.mark.parametrize("state", ["uploading", "stalledUP", "queuedUP", "forcedUP", "pausedUP", "stoppedUP"])
+def test_hardlink_completed_seeding_handoff_is_idempotent(config, tmp_path, monkeypatch, state):
+    client = prepare(config, tmp_path, monkeypatch)
+    config.filesystem.mode = "hardlink"
+    client.state = state
+    plan, result = import_torrent(config, HASH, client=client)
+    assert result["status"] == "handed off"
+    for file in plan.entries[0].files:
+        assert os.path.samefile(file.source, file.destination)
+    _, repeated = import_torrent(config, HASH, client=client)
+    assert repeated["status"] == "already handed off"
+
+
+@pytest.mark.parametrize("changes", [{"state": "checkingUP"}, {"state": "moving"},
+                                      {"progress": .999}, {"amount_left": 1}, {"state": "downloading"}])
+def test_hardlink_does_not_accept_unfinished_torrents(changes):
+    torrent = {"state": "uploading", "progress": 1, "amount_left": 0, **changes}
+    with pytest.raises(DownloadError):
+        stopped_complete(torrent, allow_seeding=True)
+
+
+def test_overlapping_complete_seeder_allowed_only_for_links(tmp_path):
+    root = tmp_path / "Downloads"
+    root.mkdir()
+    content = root / "shared"
+    rows = [{"hash": "b" * 40, "content_path": str(content), "state": "uploading", "progress": 1, "amount_left": 0}]
+    client = QBittorrentClient(QBittorrent(url="http://localhost:8080"),
+                              transport=httpx.MockTransport(lambda request: httpx.Response(200, json=rows)))
+    with pytest.raises(DownloadError, match="shares"):
+        client.assert_no_active_overlap(HASH, [content / "movie.mkv"], root)
+    client.assert_no_active_overlap(HASH, [content / "movie.mkv"], root, allow_seeding=True)
+    rows[0]["progress"] = .5
+    with pytest.raises(DownloadError, match="shares"):
+        client.assert_no_active_overlap(HASH, [content / "movie.mkv"], root, allow_seeding=True)

@@ -1,4 +1,4 @@
-"""Recoverable, idempotent moves of stopped torrents into configured Incoming."""
+"""Recoverable imports of completed torrents into configured Incoming."""
 
 import json
 import re
@@ -34,11 +34,12 @@ def verify_torrent(plan, config, *, recovering=False, client=None):
         raise DownloadError('handoff downloader identity no longer matches configuration')
     client = client or QBittorrentClient(config.qbittorrent)
     torrent, _ = client.torrent(torrent_hash(plan.download_hash))
-    stopped_complete(torrent, recovering=recovering)
+    stopped_complete(torrent, recovering=recovering, allow_seeding=plan.transfer_mode == 'hardlink')
     if Path(torrent.get('content_path', '')) != plan.download_source:
         raise DownloadError('torrent content path changed after handoff was planned')
+    overlap_options = {'allow_seeding': True} if plan.transfer_mode == 'hardlink' else {}
     client.assert_no_active_overlap(plan.download_hash, [file.source for entry in plan.entries for file in entry.files],
-                                    config.downloads.path)
+                                    config.downloads.path, **overlap_options)
 
 
 def local_path(value, root):
@@ -199,7 +200,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                 if attempted and not dry_run:
                     verify_torrent(plan, config, client=client)
                     torrent, files = client.torrent(torrent_id, include_files=True)
-                    stopped_complete(torrent)
+                    stopped_complete(torrent, allow_seeding=plan.transfer_mode == 'hardlink')
                     states = retry_states(plan, attempted, file_states(torrent, files, config))
                     frozen = config.model_copy(deep=True)
                     frozen.filesystem.mode = plan.transfer_mode
@@ -210,7 +211,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                     connection.commit()
             else:
                 torrent, files = client.torrent(torrent_id, include_files=True)
-                stopped_complete(torrent)
+                stopped_complete(torrent, allow_seeding=config.filesystem.mode == 'hardlink')
                 states = file_states(torrent, files, config)
                 if not states:
                     return None, {'status': 'no selected media files; untouched', 'transaction_id': None}
