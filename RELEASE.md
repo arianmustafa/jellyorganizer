@@ -1,5 +1,26 @@
 # Release validation
 
+## 1.3.0 — 2026-10-11
+
+Version **1.3.0** adds optional symbolic-link imports for Incoming and completed
+seeding torrents. Links point directly to retained originals, including through
+download handoffs. Repeated imports, missing-link repair, movie versions, audit
+relocations, undo, and interruption recovery retain verified link ownership.
+
+Local Python 3.13 validation passed 412 tests, including 43 new symbolic-link
+checks. Coverage includes media and subtitles, changed originals and links,
+apply/undo/rollback interruptions, download completion, and relocation of multiple
+movie versions. The frozen matching corpus passed all 40 cases with zero wrong
+automatic matches. Storage validation passed 18 interruption checks and 25
+repeated cycles; the Incoming soak passed three cycles. A clean installed wheel
+passed symbolic-link import and undo, packaged configuration, and matching checks.
+
+Local storage checks use one physical filesystem; unavailable-link and
+cross-filesystem behavior use fault injection. Downloader checks use simulated
+responses. The tagged GitHub workflow validates Python 3.13 and 3.14, builds both
+packages, and checks clean wheel installation before creating the release assets.
+Earlier release measurements follow.
+
 ## 1.2.0 — 2026-10-10
 
 Version **1.2.0** allows hard-link imports of completed seeding torrents and adds
