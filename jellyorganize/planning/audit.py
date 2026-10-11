@@ -16,7 +16,7 @@ from jellyorganize.scanner.sidecars import MEDIA_EXTENSIONS, sidecar_target_name
 FOLDER = re.compile(r"^(.+?) \((19\d{2}|20\d{2})\) \[tmdbid-(\d+)\]$")
 
 
-def already_canonical(item: MediaItem, config: Config) -> bool:
+def already_canonical(item: MediaItem, config: Config, *, links=None) -> bool:
     """Trust a complete local provider-ID layout without a network lookup."""
     if not config.naming.include_tmdb_id:
         return False
@@ -60,10 +60,10 @@ def already_canonical(item: MediaItem, config: Config) -> bool:
                for sidecar in item.sidecars):
         return False
     return not _conflict(Proposal(item, "SKIP", "already canonical", destination=item.path,
-                                  sidecar_destinations=sidecars))
+                                  sidecar_destinations=sidecars), links=links)
 
 
-def _conflict(proposal: Proposal) -> bool:
+def _conflict(proposal: Proposal, *, links=None) -> bool:
     """Check occupied destinations, ignoring only this item's unchanged paths."""
     destination = proposal.destination
     if destination is None:
@@ -81,7 +81,7 @@ def _conflict(proposal: Proposal) -> bool:
         return True
     if proposal.item.kind == "movie":
         from jellyorganize.naming.movie_versions import movie_conflict
-        return movie_conflict(destination, proposal.item.path)
+        return movie_conflict(destination, proposal.item.path, links=links)
     for path in parent.iterdir():
         if path == proposal.item.path or not path.is_file() or path.suffix.lower() not in MEDIA_EXTENSIONS:
             continue
@@ -96,6 +96,8 @@ def _conflict(proposal: Proposal) -> bool:
 
 async def plan_audit(scan: ScanResult, config: Config, tmdb, tvmaze=None, identities=None,
                      skip_paths: set[Path] | None = None) -> list[Proposal]:
+    from jellyorganize.filesystem.links import LinkedImports
+    links = LinkedImports(config)
     proposals: list[Proposal] = []
     for item in scan.items:
         if skip_paths and item.path in skip_paths:
@@ -104,7 +106,7 @@ async def plan_audit(scan: ScanResult, config: Config, tmdb, tvmaze=None, identi
         if item.reason:
             proposals.append(Proposal(item, "SKIP", item.reason))
             continue
-        if already_canonical(item, config):
+        if already_canonical(item, config, links=links):
             proposals.append(Proposal(item, "SKIP", "already canonical"))
             continue
         if identities is not None and identities.lookup(item)[1]:
@@ -127,7 +129,7 @@ async def plan_audit(scan: ScanResult, config: Config, tmdb, tvmaze=None, identi
             proposals.append(Proposal(item, "REVIEW", str(error), confidence, candidate, alternatives=choices))
             continue
         if target == item.path and all(source == destination for source, destination in sidecars.items()) and not _conflict(
-            Proposal(item, "SKIP", "already canonical", destination=target, sidecar_destinations=sidecars)):
+            Proposal(item, "SKIP", "already canonical", destination=target, sidecar_destinations=sidecars), links=links):
             proposals.append(Proposal(item, "SKIP", "already canonical", confidence, candidate, target, sidecars))
             continue
         status = "CONFIRMED" if confidence >= config.matching.auto_apply_threshold else "REVIEW"
@@ -139,7 +141,7 @@ async def plan_audit(scan: ScanResult, config: Config, tmdb, tvmaze=None, identi
     for proposal in proposals:
         if proposal.destination is None or proposal.status == "SKIP":
             continue
-        if _conflict(proposal):
+        if _conflict(proposal, links=links):
             proposal.status = "CONFLICT"
             proposal.reason = "destination exists or another release occupies the target"
         paths = [proposal.destination, *proposal.sidecar_destinations.values()]

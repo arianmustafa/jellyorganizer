@@ -10,8 +10,10 @@ from jellyorganize.planning.store import snapshot
 
 
 class CompletionTracker:
-    def __init__(self, path):
+    def __init__(self, path, config=None):
         self.path = path
+        from jellyorganize.filesystem.links import LinkedImports
+        self.links = LinkedImports(config) if config is not None else None
 
     @contextmanager
     def database(self):
@@ -26,9 +28,8 @@ class CompletionTracker:
         finally:
             connection.close()
 
-    @staticmethod
-    def fingerprint(item):
-        states = [snapshot(path).model_dump(mode="json") for path in sorted([item.path, *item.sidecars])]
+    def fingerprint(self, item):
+        states = [snapshot(path, self.links).model_dump(mode="json") for path in sorted([item.path, *item.sidecars])]
         return hashlib.sha256(json.dumps(states, sort_keys=True).encode()).hexdigest()
 
     def acknowledge(self, item):
@@ -77,6 +78,7 @@ class CompletionTracker:
                 since = connection.execute("SELECT unchanged_since FROM observations WHERE source=?",
                                            (str(item.path),)).fetchone()[0]
             stability = min(incoming.stability_seconds, max(0, incoming.stability_seconds - (now - since)))
-        newest = max(snapshot(path).mtime_ns for path in [item.path, *item.sidecars]) / 1e9
+        states = [snapshot(path, self.links) for path in [item.path, *item.sidecars]]
+        newest = max(state.link.mtime_ns if state.link is not None else state.mtime_ns for state in states) / 1e9
         age = min(incoming.minimum_age_seconds, max(0, incoming.minimum_age_seconds - (now - newest)))
         return max(stability, age)

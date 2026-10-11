@@ -2,6 +2,7 @@
 
 import os
 import secrets
+import stat
 from contextlib import ExitStack
 
 from jellyorganize.filesystem.safety import root_fd
@@ -37,17 +38,26 @@ def probe(source, destination, mode):
                 os.fsync(stream.fileno())
             result.update(source_device=current.st_dev, destination_device=os.fstat(dst).st_dev)
             try:
-                os.link(source_name, destination_name, src_dir_fd=src, dst_dir_fd=dst, follow_symlinks=False)
+                if mode == "symlink":
+                    os.symlink(str(source / source_name), destination_name, dir_fd=dst)
+                else:
+                    os.link(source_name, destination_name, src_dir_fd=src, dst_dir_fd=dst, follow_symlinks=False)
                 linked = os.stat(destination_name, dir_fd=dst, follow_symlinks=False)
                 names.append((dst, destination_name, (linked.st_dev, linked.st_ino)))
-                result["link_supported"] = (linked.st_dev, linked.st_ino) == (current.st_dev, current.st_ino)
+                if mode == "symlink":
+                    target = os.stat(destination_name, dir_fd=dst)
+                    result["link_supported"] = (stat.S_ISLNK(linked.st_mode) and
+                                                os.readlink(destination_name, dir_fd=dst) == str(source / source_name) and
+                                                (target.st_dev, target.st_ino) == (current.st_dev, current.st_ino))
+                else:
+                    result["link_supported"] = (linked.st_dev, linked.st_ino) == (current.st_dev, current.st_ino)
                 if not result["link_supported"]:
                     raise ValueError("link identity verification failed")
                 os.fsync(dst)
             except OSError as error:
                 result["link_error"] = f"{error.strerror or type(error).__name__} (errno {error.errno})"
-                if mode == "hardlink":
-                    raise ValueError("hard-link probe failed: " + result["link_error"]) from error
+                if mode in {"hardlink", "symlink"}:
+                    raise ValueError(mode + " probe failed: " + result["link_error"]) from error
                 descriptor = os.open(destination_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                      0o600, dir_fd=dst)
                 current = os.fstat(descriptor)

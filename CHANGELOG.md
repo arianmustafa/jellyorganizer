@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — 2026-10-11
+
+- Add `filesystem.mode = "symlink"` for Incoming and completed qBittorrent imports,
+  retaining originals and supporting links across filesystems while seeding.
+- Track symbolic links through repeat imports, missing-link repair, audit, undo,
+  and crash recovery. Library links point directly to the retained original.
+- Check symbolic-link creation and target access with `doctor` in symlink mode.
+
 ## 1.2.0 — 2026-10-10
 
 - Import completed qBittorrent torrents while they continue seeding in hard-link
