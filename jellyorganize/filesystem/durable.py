@@ -12,7 +12,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from jellyorganize.filesystem.safety import UnsafePath, assert_state, parent_fd, relative_file, root_fd
-from jellyorganize.planning.store import FileState
+from jellyorganize.planning.store import FileState, RetainedSource
 
 
 _active = ContextVar("jellyorganize_move", default=None)
@@ -35,10 +35,14 @@ def rename_noreplace(parent: int, source: str, destination: str) -> None:
         raise OSError(error, os.strerror(error), destination)
 
 
-def new_receipt(file: FileState, source_root: Path, destination_root: Path, mode: str = "move", *, link_only=False) -> dict:
-    return {"source_state": file.model_dump(mode="json"), "source_root": str(source_root),
+def new_receipt(file: FileState, source_root: Path, destination_root: Path, mode: str = "move", *, link_only=False,
+                retained_state=None) -> dict:
+    receipt = {"source_state": file.model_dump(mode="json"), "source_root": str(source_root),
             "destination_root": str(destination_root), "stage": f".jellyorganize-{secrets.token_hex(16)}.part",
             "phase": "intent", "transfer_mode": mode, "link_only": link_only}
+    if retained_state is not None:
+        receipt["retained_state"] = retained_state.model_dump(mode="json")
+    return receipt
 
 
 def validate_mode(transaction, plan, record=None):
@@ -63,9 +67,9 @@ def active_move():
     return _active.get()
 
 
-def _state(file, current):
+def _state(file, current, *, link=None):
     return FileState(source=file.destination, destination=file.source, size=current.st_size,
-                     mtime_ns=current.st_mtime_ns, inode=current.st_ino, device=current.st_dev)
+                     mtime_ns=current.st_mtime_ns, inode=current.st_ino, device=current.st_dev, link=link)
 
 
 def _exists(descriptor, name):
@@ -80,12 +84,16 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
             receipt["source_root"] != str(source_root) or receipt["destination_root"] != str(destination_root)):
         raise UnsafePath("move receipt does not match file decisions")
     mode = receipt.get("transfer_mode", "move")
-    if mode not in {"move", "hardlink", "unlink"}:
+    if mode not in {"move", "hardlink", "symlink", "unlink", "unlink-symlink"}:
         raise UnsafePath("unsupported receipt mode")
     stage_name = receipt["stage"]
     if (not stage_name.startswith(".jellyorganize-") or not stage_name.endswith(".part") or
             Path(stage_name).name != stage_name):
         raise UnsafePath("invalid staging filename")
+    if mode in {"symlink", "unlink-symlink"} or file.link is not None:
+        if mode not in {"move", "symlink", "unlink-symlink"}:
+            raise UnsafePath("symbolic links require move or symlink mode")
+        return _execute_symlink(file, source_root, destination_root, transaction, receipt)
     transaction.write()
     checkpoint("intent_written")
     with ExitStack() as stack:
@@ -252,6 +260,117 @@ def execute(file, source_root, destination_root, config, transaction, receipt, h
         return expected
 
 
+def _execute_symlink(file, source_root, destination_root, transaction, receipt):
+    """Publish absolute symlinks without following or copying media bytes."""
+    mode = receipt["transfer_mode"]
+    link = file.link or RetainedSource(root=source_root, **file.model_dump(exclude={"destination", "link"}))
+    transaction.write()
+    checkpoint("intent_written")
+    with ExitStack() as stack:
+        src = root_fd(source_root)
+        stack.callback(os.close, src)
+        dst = root_fd(destination_root)
+        stack.callback(os.close, dst)
+        source_parent, source_name = stack.enter_context(parent_fd(src, relative_file(file.source, source_root)))
+        destination_parent, destination_name = stack.enter_context(parent_fd(
+            dst, relative_file(file.destination, destination_root), create=True))
+        if mode == "unlink-symlink":
+            retained = FileState.model_validate(receipt.get("retained_state", {}))
+            if retained.source != file.destination or retained.destination != file.source or file.link is None:
+                raise UnsafePath("invalid retained source for symlink removal")
+            if retained.link is not None:
+                if retained.link != file.link:
+                    raise UnsafePath("retained symlink target changed")
+            elif (retained.source != link.source or destination_root != link.root or
+                  (retained.size, retained.mtime_ns, retained.inode, retained.device) !=
+                  (link.size, link.mtime_ns, link.inode, link.device)):
+                raise UnsafePath("retained original does not match symlink target")
+            current = assert_state(destination_parent, destination_name, retained)
+            if _exists(source_parent, source_name) is not None:
+                assert_state(source_parent, source_name, file)
+                os.unlink(source_name, dir_fd=source_parent)
+                os.fsync(source_parent)
+                checkpoint("link_removed")
+            restored = _state(file, current, link=retained.link)
+            receipt.update(destination_state=restored.model_dump(mode="json"), phase="moved")
+            transaction.write()
+            checkpoint("move_recorded")
+            return restored
+
+        final = _exists(destination_parent, destination_name)
+        recorded = receipt.get("destination_state")
+        expected = FileState.model_validate(recorded) if recorded else None
+        if expected is not None and (expected.source != file.destination or expected.destination != file.source or expected.link != link):
+            raise UnsafePath("symbolic link receipt does not match source")
+        if final is not None:
+            if expected is None:
+                raise FileExistsError(f"destination exists without our receipt: {file.destination}")
+            assert_state(destination_parent, destination_name, expected)
+            if mode == "symlink" or _exists(source_parent, source_name) is not None:
+                assert_state(source_parent, source_name, file)
+                if mode == "move":
+                    os.unlink(source_name, dir_fd=source_parent)
+                    os.fsync(source_parent)
+                    checkpoint("source_removed")
+            receipt["phase"] = "moved"
+            transaction.write()
+            checkpoint("move_recorded")
+            return expected
+        assert_state(source_parent, source_name, file)
+        if receipt.get("reused"):
+            receipt["reused"] = False
+            transaction.write()
+        stage = receipt["stage"]
+        staged = _exists(destination_parent, stage)
+        if receipt["phase"] in {"verified", "published", "moved"}:
+            if staged is None or expected is None:
+                raise UnsafePath("verified symbolic link stage is missing")
+            assert_state(destination_parent, stage, expected)
+        else:
+            if staged is not None:
+                if stat.S_ISLNK(staged.st_mode) and receipt.get("stage_identity") == [staged.st_dev, staged.st_ino]:
+                    os.unlink(stage, dir_fd=destination_parent)
+                    os.fsync(destination_parent)
+                else:
+                    receipt.setdefault("preserved_stages", []).append(stage)
+                    stage = receipt["stage"] = f".jellyorganize-{secrets.token_hex(16)}.part"
+                    transaction.write()
+            receipt.pop("destination_state", None)
+            receipt.pop("stage_identity", None)
+            os.symlink(str(link.source), stage, dir_fd=destination_parent)
+            checkpoint("stage_created")
+            staged = os.stat(stage, dir_fd=destination_parent, follow_symlinks=False)
+            receipt.update(stage_identity=[staged.st_dev, staged.st_ino], phase="staged")
+            os.fsync(destination_parent)
+            transaction.write()
+            checkpoint("stage_recorded")
+            assert_state(source_parent, source_name, file)
+            expected = _state(file, staged, link=link)
+            assert_state(destination_parent, stage, expected)
+            receipt.update(destination_state=expected.model_dump(mode="json"), phase="verified")
+            transaction.write()
+            checkpoint("stage_verified")
+        assert_state(source_parent, source_name, file)
+        assert_state(destination_parent, stage, expected)
+        rename_noreplace(destination_parent, stage, destination_name)
+        os.fsync(destination_parent)
+        checkpoint("published")
+        receipt["phase"] = "published"
+        transaction.write()
+        assert_state(source_parent, source_name, file)
+        assert_state(destination_parent, destination_name, expected)
+        if mode == "move":
+            os.unlink(source_name, dir_fd=source_parent)
+            os.fsync(source_parent)
+            checkpoint("source_removed")
+        else:
+            checkpoint("source_retained")
+        receipt["phase"] = "moved"
+        transaction.write()
+        checkpoint("move_recorded")
+        return expected
+
+
 def discard_stage(file, destination_root, transaction, receipt):
     """Remove only a stage whose ownership was recorded, retaining uncertain data."""
     stage = receipt.get("stage")
@@ -263,7 +382,8 @@ def discard_stage(file, destination_root, transaction, receipt):
         parent, _ = stack.enter_context(parent_fd(descriptor, relative_file(file.destination, destination_root)))
         current = _exists(parent, stage)
         identity = receipt.get("stage_identity")
-        if current is not None and identity == [current.st_dev, current.st_ino] and stat.S_ISREG(current.st_mode):
+        if current is not None and identity == [current.st_dev, current.st_ino] and (
+                stat.S_ISREG(current.st_mode) or stat.S_ISLNK(current.st_mode)):
             os.unlink(stage, dir_fd=parent)
             os.fsync(parent)
             receipt["phase"] = "discarded"

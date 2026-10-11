@@ -9,10 +9,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from jellyorganize.config import Config
 from jellyorganize.models import Candidate, Proposal, Status
+
+
+class RetainedSource(BaseModel):
+    root: Path
+    source: Path
+    size: int
+    mtime_ns: int
+    inode: int
+    device: int
 
 
 class SourceState(BaseModel):
@@ -21,6 +30,14 @@ class SourceState(BaseModel):
     mtime_ns: int
     inode: int
     device: int
+    link: RetainedSource | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if self.link is None:
+            data.pop("link", None)
+        return data
 
 
 class FileState(SourceState):
@@ -47,7 +64,7 @@ class PlanEntry(BaseModel):
 class SavedPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = 1
-    transfer_mode: Literal["move", "hardlink"] = "move"
+    transfer_mode: Literal["move", "hardlink", "symlink"] = "move"
     workflow: Literal["ingest", "audit", "handoff"] = "ingest"
     plan_id: str
     created_at: str
@@ -79,16 +96,18 @@ def configured_roots(config: Config, kind: str, workflow: str) -> tuple[Path, Pa
     return (config.incoming_root(kind) if workflow == "ingest" else paths.library), paths.library
 
 
-def snapshot(source: Path) -> SourceState:
+def snapshot(source: Path, links=None) -> SourceState:
     stat = source.lstat()
+    if source.is_symlink() and links is not None:
+        return SourceState.model_validate(links.snapshot(source).model_dump())
     if not source.is_file() or source.is_symlink():
         raise ValueError(f"source is not a regular file: {source}")
     return SourceState(source=source, size=stat.st_size, mtime_ns=stat.st_mtime_ns,
                        inode=stat.st_ino, device=stat.st_dev)
 
 
-def capture(source: Path, destination: Path) -> FileState:
-    return FileState(**snapshot(source).model_dump(), destination=destination)
+def capture(source: Path, destination: Path, links=None) -> FileState:
+    return FileState(**snapshot(source, links).model_dump(), destination=destination)
 
 
 def entry_from_proposal(proposal: Proposal, config: Config) -> PlanEntry:
@@ -100,10 +119,12 @@ def entry_from_proposal(proposal: Proposal, config: Config) -> PlanEntry:
     reason = proposal.reason
     if proposal.status in ("CONFIRMED", "REVIEW", "CONFLICT"):
         try:
-            source_states = [snapshot(item.path), *(snapshot(path) for path in item.sidecars)]
+            from jellyorganize.filesystem.links import LinkedImports
+            links = LinkedImports(config) if any(path.is_symlink() for path in [item.path, *item.sidecars]) else None
+            source_states = [snapshot(item.path, links), *(snapshot(path, links) for path in item.sidecars)]
             if proposal.destination is not None:
-                files.append(capture(item.path, proposal.destination))
-                files.extend(capture(source, destination) for source, destination in proposal.sidecar_destinations.items())
+                files.append(capture(item.path, proposal.destination, links))
+                files.extend(capture(source, destination, links) for source, destination in proposal.sidecar_destinations.items())
         except (OSError, ValueError) as error:
             status = "ERROR"
             reason = f"source changed during planning: {error}"
@@ -147,7 +168,7 @@ class PlanStore:
                          entries=[PlanEntry(source=states[0].source, kind="download", source_root=source_root,
                                             destination_root=destination_root, status="CONFIRMED", confidence=1.0,
                                             reason="qBittorrent confirms complete download; preserve nested paths" +
-                                            (" and retain seeding originals" if config.filesystem.mode == "hardlink" else "; torrent stopped"),
+                                            (" and retain seeding originals" if config.filesystem.mode in {"hardlink", "symlink"} else "; torrent stopped"),
                                             destination=states[0].destination, files=states,
                                             source_states=[SourceState.model_validate(state.model_dump()) for state in states])])
         return self.save(plan)

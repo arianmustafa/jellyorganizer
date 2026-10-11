@@ -12,6 +12,8 @@ from jellyorganize.filesystem.durable import journal_move, new_receipt, discard_
 
 
 def _reverse_files(record, entry, config, workflow, mode="move"):
+    from jellyorganize.filesystem.links import LinkedImports
+    links = LinkedImports(config)
     if entry.status != "CONFIRMED":
         raise UnsafePath("transaction item was not confirmed in saved plan")
     source_root, destination_root = configured_roots(config, entry.kind, workflow)
@@ -38,13 +40,24 @@ def _reverse_files(record, entry, config, workflow, mode="move"):
         if file.get("status") != "moved" or not isinstance(file.get("destination_state"), dict):
             raise UnsafePath("transaction has no completed move state")
         state = FileState.model_validate(file["destination_state"])
-        if state.source != planned.destination or state.destination != planned.source or state.size != planned.size:
+        if (state.source != planned.destination or state.destination != planned.source or
+                (mode != "symlink" and state.size != planned.size)):
             raise UnsafePath("transaction reverse paths do not match saved plan")
+        if state.link is not None:
+            state = links.current(state)
+            if state.source != planned.destination:
+                raise UnsafePath("undo the library audit before undoing its import")
         _check_unchanged(state, entry.destination_root)
-        if mode == "hardlink":
+        if mode in {"hardlink", "symlink"}:
             _check_unchanged(planned, entry.source_root)
-            if (state.device, state.inode, state.mtime_ns) != (planned.device, planned.inode, planned.mtime_ns):
+            if mode == "hardlink" and (state.device, state.inode, state.mtime_ns) != (planned.device, planned.inode, planned.mtime_ns):
                 raise UnsafePath("undo destination is not the recorded hard link")
+            if mode == "symlink":
+                from jellyorganize.planning.store import RetainedSource
+                retained = planned.link or RetainedSource(root=entry.source_root,
+                                                          **planned.model_dump(exclude={"destination", "link"}))
+                if state.link != retained:
+                    raise UnsafePath("undo destination is not the recorded symbolic link")
             if file.get("reused"):
                 continue
         elif state.destination.exists() or state.destination.is_symlink():
@@ -86,9 +99,10 @@ def undo_transaction(transaction_id: str, config: Config) -> tuple[Transaction, 
                 from jellyorganize.filesystem.links import LinkedImports
                 links = LinkedImports(config)
                 result["moves"] = [new_receipt(state, entry.destination_root, entry.source_root,
-                                              "unlink" if mode == "hardlink" else "move",
+                                              "unlink-symlink" if mode == "symlink" else "unlink" if mode == "hardlink" else "move",
+                                              retained_state=FileState.model_validate(file["source_state"]) if mode == "symlink" else None,
                                               link_only=plan.workflow == "audit" and links.protected(state))
-                                   for _, state in reversed(reverse)]
+                                   for file, state in reversed(reverse)]
                 transaction.write()
                 # Move the media back first, then its sidecars, reversing apply order.
                 for file, state in reversed(reverse):
@@ -126,12 +140,16 @@ def undo_transaction(transaction_id: str, config: Config) -> tuple[Transaction, 
                         try:
                             receipt = next(move for move in result["moves"] if move["source_state"]["source"] == str(state.destination))
                             rollback = receipt["rollback"] = new_receipt(state, entry.source_root, entry.destination_root,
-                                                                         "hardlink" if mode == "hardlink" else "move",
+                                                                         mode if mode in {"hardlink", "symlink"} else "move",
                                                                          link_only=receipt.get("link_only", False))
                             with journal_move(transaction, rollback):
                                 refreshed = _move_file(state, entry.source_root, entry.destination_root, config)
                             receipt["phase"] = "rolled_back"
                             file["destination_state"] = refreshed.model_dump(mode="json")
+                            if mode == "symlink":
+                                forward = next(move for move in record["moves"]
+                                               if move["source_state"]["source"] == file["source"])
+                                forward["destination_state"] = refreshed.model_dump(mode="json")
                             result["files"].append({"source": str(state.source), "destination": str(state.destination), "status": "rolled back"})
                         except (OSError, ValueError) as error:
                             result["status"] = "error"

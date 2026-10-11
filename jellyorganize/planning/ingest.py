@@ -34,14 +34,14 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
         try:
             linked = links.package(item)
         except (OSError, UnsafePath) as error:
-            proposals.append(Proposal(item, "CONFLICT", f"retained hard-link import changed: {error}"))
+            proposals.append(Proposal(item, "CONFLICT", f"retained link import changed: {error}"))
             continue
         if linked is not None:
             entry, targets, complete = linked
             if complete:
-                proposals.append(Proposal(item, "SKIP", "already hard-linked; originals retained"))
-            elif config.filesystem.mode != "hardlink":
-                proposals.append(Proposal(item, "CONFLICT", "tracked hard-link destination missing; enable hardlink mode to repair"))
+                proposals.append(Proposal(item, "SKIP", "already linked; originals retained"))
+            elif config.filesystem.mode != links.mode(item.path, entry.source_root, entry.destination_root):
+                proposals.append(Proposal(item, "CONFLICT", "tracked link destination missing; enable its original link mode to repair"))
             else:
                 proposals.append(Proposal(item, "CONFIRMED", "repair missing links using saved identity", entry.confidence,
                                           entry.candidate, targets[item.path],
@@ -82,7 +82,7 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
         release_key = (movie_release_key(proposal.destination) if proposal.item.kind == "movie"
                        else (proposal.destination.parent, " - ".join(proposal.destination.stem.split(" - ")[:2])))
         if proposal.item.kind == "movie":
-            duplicate = movie_conflict(proposal.destination, proposal.item.path, owned)
+            duplicate = movie_conflict(proposal.destination, proposal.item.path, owned, links=links)
         else:
             prefix = release_key[1]
             duplicate = proposal.destination.parent.is_dir() and any(
@@ -95,8 +95,8 @@ async def plan_ingest(scan: ScanResult, config: Config, tmdb, tvmaze=None, ident
                  (target_coverage and len(target_coverage[1]) > 1 and coverage(path) is None))
                 for path in proposal.destination.parent.iterdir()))
         if proposal.item.path in repairs:
-            duplicate = _release_conflict(entry, owned)
-        if len(paths) != len(set(paths)) or any(path.exists() for path in paths if path not in owned) or duplicate:
+            duplicate = _release_conflict(entry, owned, links=links)
+        if len(paths) != len(set(paths)) or any(path.exists() or path.is_symlink() for path in paths if path not in owned) or duplicate:
             proposal.status = "CONFLICT"
             proposal.reason = "destination exists, duplicate media, or sidecar names collide"
         if release_key in releases:

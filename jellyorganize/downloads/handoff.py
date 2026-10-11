@@ -34,10 +34,10 @@ def verify_torrent(plan, config, *, recovering=False, client=None):
         raise DownloadError('handoff downloader identity no longer matches configuration')
     client = client or QBittorrentClient(config.qbittorrent)
     torrent, _ = client.torrent(torrent_hash(plan.download_hash))
-    stopped_complete(torrent, recovering=recovering, allow_seeding=plan.transfer_mode == 'hardlink')
+    stopped_complete(torrent, recovering=recovering, allow_seeding=plan.transfer_mode in {'hardlink', 'symlink'})
     if Path(torrent.get('content_path', '')) != plan.download_source:
         raise DownloadError('torrent content path changed after handoff was planned')
-    overlap_options = {'allow_seeding': True} if plan.transfer_mode == 'hardlink' else {}
+    overlap_options = {'allow_seeding': True} if plan.transfer_mode in {'hardlink', 'symlink'} else {}
     client.assert_no_active_overlap(plan.download_hash, [file.source for entry in plan.entries for file in entry.files],
                                     config.downloads.path, **overlap_options)
 
@@ -95,7 +95,7 @@ def acknowledge_handoff(plan, config):
     fast = config.model_copy(deep=True)
     fast.incoming.minimum_age_seconds = 0
     transferred = {state.destination for entry in plan.entries for state in entry.files}
-    tracker = CompletionTracker(config.state_dir / 'completion.sqlite3')
+    tracker = CompletionTracker(config.state_dir / 'completion.sqlite3', config)
     for kind in ('movie', 'tv'):
         for item in scan_incoming(fast, kind).items:
             if item.path in transferred and not item.reason:
@@ -148,7 +148,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                 expected_source, expected_destination = configured_roots(config, 'download', 'handoff')
                 if plan.source_roots != {'download': expected_source} or plan.destination_roots != {'download': expected_destination}:
                     raise DownloadError('previous handoff roots no longer match configuration')
-                if plan.transfer_mode == 'hardlink':
+                if plan.transfer_mode in {'hardlink', 'symlink'}:
                     torrent, files = client.torrent(torrent_id, include_files=True)
                     if Path(torrent.get('content_path', '')) != plan.download_source:
                         raise DownloadError('torrent content path changed after handoff was planned')
@@ -165,7 +165,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                     completed = Transaction.load(root, transaction_id)
                     if any(item.get('status') != 'applied' for item in completed.data['items']):
                         complete, attempted = False, completed
-                    elif plan.transfer_mode == 'hardlink':
+                    elif plan.transfer_mode in {'hardlink', 'symlink'}:
                         from jellyorganize.filesystem.apply import _check_unchanged
                         from jellyorganize.filesystem.links import LinkedImports
                         links = LinkedImports(config)
@@ -183,7 +183,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                             continue
                         attempted = journal
                         if data['items'] and all(item.get('status') == 'applied' for item in data['items']):
-                            if plan.transfer_mode == 'hardlink':
+                            if plan.transfer_mode in {'hardlink', 'symlink'}:
                                 from jellyorganize.filesystem.links import LinkedImports
                                 links = LinkedImports(config)
                                 if not all(links.owned(file, entry.source_root, entry.destination_root) is not None
@@ -200,7 +200,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                 if attempted and not dry_run:
                     verify_torrent(plan, config, client=client)
                     torrent, files = client.torrent(torrent_id, include_files=True)
-                    stopped_complete(torrent, allow_seeding=plan.transfer_mode == 'hardlink')
+                    stopped_complete(torrent, allow_seeding=plan.transfer_mode in {'hardlink', 'symlink'})
                     states = retry_states(plan, attempted, file_states(torrent, files, config))
                     frozen = config.model_copy(deep=True)
                     frozen.filesystem.mode = plan.transfer_mode
@@ -211,7 +211,7 @@ def import_torrent(config, torrent_id, *, dry_run=False, client=None):
                     connection.commit()
             else:
                 torrent, files = client.torrent(torrent_id, include_files=True)
-                stopped_complete(torrent, allow_seeding=config.filesystem.mode == 'hardlink')
+                stopped_complete(torrent, allow_seeding=config.filesystem.mode in {'hardlink', 'symlink'})
                 states = file_states(torrent, files, config)
                 if not states:
                     return None, {'status': 'no selected media files; untouched', 'transaction_id': None}

@@ -36,7 +36,7 @@ def release_key(path):
     return path.parent, label.casefold() if label else None
 
 
-def movie_conflict(target, source, ignored=()):
+def movie_conflict(target, source, ignored=(), *, links=None):
     parent = target.parent
     if not parent.exists():
         return False
@@ -49,6 +49,13 @@ def movie_conflict(target, source, ignored=()):
         if not (sibling.is_file() or sibling.is_symlink()):
             continue
         other = version_of(sibling)
-        if sibling.is_symlink() or not label or not other or label.casefold() == other.casefold():
+        if sibling.is_symlink():
+            try:
+                if links is None:
+                    return True
+                links.snapshot(sibling)
+            except (OSError, ValueError):
+                return True
+        if not label or not other or label.casefold() == other.casefold():
             return True
     return False

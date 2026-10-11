@@ -9,6 +9,7 @@ from contextlib import ExitStack
 from jellyorganize.filesystem.apply import _check_unchanged, _move_file, _release_conflict, _validate_entry
 from jellyorganize.filesystem.durable import journal_move, new_receipt, discard_stage, validate_mode
 from jellyorganize.filesystem.locking import media_lock
+from jellyorganize.filesystem.links import LinkedImports
 from jellyorganize.filesystem.safety import UnsafePath, relative_file, root_fd, parent_fd, assert_state
 from jellyorganize.filesystem.transaction import Transaction
 from jellyorganize.planning.store import FileState, PlanStore, configured_roots
@@ -67,7 +68,7 @@ def _finish(transaction, record, files, source_root, destination_root, config, m
     record["files"] = completed
 
 
-def _undo_states(record, originals):
+def _undo_states(record, originals, links=None):
     """Bind an old undo snapshot to a durably recorded copied rollback.
 
     The original apply journal can already contain the rollback's new inode
@@ -75,6 +76,8 @@ def _undo_states(record, originals):
     """
     states = {source: FileState.model_validate(file["destination_state"])
               for source, file in originals.items()}
+    if links is not None:
+        states = {source: links.current(state) if state.link is not None else state for source, state in states.items()}
     for move in record.get("moves", []):
         initial = FileState.model_validate(move["source_state"])
         current = states.get(str(initial.source))
@@ -99,6 +102,38 @@ def _rollback(transaction, record, files, source_root, destination_root, config,
     for receipt in reversed(record["moves"]):
         file = expected[receipt["source_state"]["source"]]
         if receipt.get("reused"):
+            continue
+        if mode in {"symlink", "unlink-symlink"}:
+            if mode == "symlink" and receipt.get("destination_state") is None:
+                _check_unchanged(file, source_root)
+                discard_stage(file, destination_root, transaction, receipt)
+                receipt["phase"] = "rolled_back"
+                transaction.write()
+                continue
+            if mode == "symlink":
+                reverse = FileState.model_validate(receipt["destination_state"])
+                rollback_mode = "unlink-symlink"
+                retained = file
+            else:
+                retained = FileState.model_validate(receipt["retained_state"])
+                reverse = retained.model_copy(update={"destination": file.source})
+                rollback_mode = "symlink"
+                retained = None
+            rollback = receipt.setdefault("rollback", new_receipt(
+                reverse, destination_root, source_root, rollback_mode, retained_state=retained))
+            if rollback.get("transfer_mode") != rollback_mode or rollback.get("source_state") != reverse.model_dump(mode="json"):
+                raise UnsafePath("symlink rollback does not match saved operation")
+            if mode == "unlink-symlink" and file.source.is_symlink() and not rollback.get("destination_state"):
+                _check_unchanged(file, source_root)
+                rollback["destination_state"] = file.model_dump(mode="json")
+                transaction.write()
+            with journal_move(transaction, rollback):
+                restored = _move_file(reverse, destination_root, source_root, config)
+            if mode == "symlink":
+                discard_stage(file, destination_root, transaction, receipt)
+            receipt["phase"] = "rolled_back"
+            refreshed[str(file.source)] = restored
+            transaction.write()
             continue
         if mode in {"hardlink", "unlink"}:
             if receipt.get("destination_state") is None and mode == "hardlink":
@@ -209,13 +244,12 @@ def recover_pending(config, root: Path | None = None, *, fail_on_blocked=False):
                     validate_mode(original, plan, applied)
                     originals = {file["destination"]: file for file in applied["files"]
                                  if file.get("status") == "moved" and not file.get("reused")}
-                    files = _undo_states(record, originals)
+                    files = _undo_states(record, originals, LinkedImports(config))
                     source_root, destination_root = entry.destination_root, entry.source_root
                 else:
                     files = entry.files
                     source_root, destination_root = entry.source_root, entry.destination_root
                 if plan.workflow == "audit":
-                    from jellyorganize.filesystem.links import LinkedImports
                     links = LinkedImports(config)
                     for receipt in record.get("moves", []):
                         if links.protected(FileState.model_validate(receipt["source_state"])):
@@ -223,10 +257,14 @@ def recover_pending(config, root: Path | None = None, *, fail_on_blocked=False):
                 if (record.get("status") not in {"started", "recovery_blocked"} or record.get("rollback_error") or
                         any(move.get("rollback") for move in record.get("moves", []))):
                     refreshed = _rollback(transaction, record, files, source_root, destination_root, config,
-                                          "unlink" if undo and mode == "hardlink" else mode)
+                                          "unlink-symlink" if undo and mode == "symlink" else "unlink" if undo and mode == "hardlink" else mode)
                     if undo:
                         for source, state in refreshed.items():
                             originals[source]["destination_state"] = state.model_dump(mode="json")
+                            if mode == "symlink":
+                                forward = next(move for move in applied["moves"]
+                                               if move["source_state"]["source"] == originals[source]["source"])
+                                forward["destination_state"] = state.model_dump(mode="json")
                         applied["status"] = "applied"
                         applied.pop("undo_transaction_id", None)
                         original.write()
@@ -236,29 +274,29 @@ def recover_pending(config, root: Path | None = None, *, fail_on_blocked=False):
                         from jellyorganize.filesystem.undo import _reverse_files
                         reverse = _reverse_files(applied, entry, config, plan.workflow, mode)
                         record["moves"] = [new_receipt(state, source_root, destination_root,
-                                                       "unlink" if mode == "hardlink" else "move",
+                                                       "unlink-symlink" if mode == "symlink" else "unlink" if mode == "hardlink" else "move",
+                                                       retained_state=FileState.model_validate(file["source_state"]) if mode == "symlink" else None,
                                                        link_only=plan.workflow == "audit" and links.protected(state))
-                                           for _, state in reversed(reverse)]
+                                           for file, state in reversed(reverse)]
                         transaction.write()
                     if not record.get("moves") and not undo:
-                        from jellyorganize.filesystem.links import LinkedImports
                         links = LinkedImports(config)
                         _validate_entry(entry, config, plan.workflow, mode=mode, links=links)
                         ordered = [*files[1:], files[0]]
                         record["moves"] = [new_receipt(file, source_root, destination_root, mode,
                                                        link_only=plan.workflow == "audit" and links.protected(file))
                                            for file in ordered if file.source != file.destination]
-                        if mode == "hardlink":
+                        if mode in {"hardlink", "symlink"}:
                             for receipt in record["moves"]:
                                 file = FileState.model_validate(receipt["source_state"])
                                 owned = links.owned(file, source_root, destination_root)
                                 if owned is not None:
                                     receipt.update(destination_state=owned.model_dump(mode="json"), reused=True)
                         transaction.write()
-                    if not undo and entry.destination and not entry.destination.exists() and _release_conflict(entry):
+                    if not undo and entry.destination and not entry.destination.exists() and _release_conflict(entry, links=LinkedImports(config)):
                         raise FileExistsError("another release occupies the recovery destination")
                     _finish(transaction, record, files, source_root, destination_root, config,
-                            "unlink" if undo and mode == "hardlink" else mode)
+                            "unlink-symlink" if undo and mode == "symlink" else "unlink" if undo and mode == "hardlink" else mode)
                     record["status"] = "undone" if undo else "applied"
                     if undo:
                         applied["status"] = "undone"

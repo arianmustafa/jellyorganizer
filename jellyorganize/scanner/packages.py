@@ -30,7 +30,7 @@ def detect_kind(path: Path, root: Path) -> str | None:
 
 
 def scan(root: Path, kind: str, *, minimum_age_seconds: int = 0, ignored_extensions: tuple[str, ...] = (),
-         ignored_directories: tuple[str, ...] = ()) -> ScanResult:
+         ignored_directories: tuple[str, ...] = (), links=None) -> ScanResult:
     result = ScanResult()
     root = root.absolute()
     if root.is_symlink():
@@ -54,7 +54,13 @@ def scan(root: Path, kind: str, *, minimum_age_seconds: int = 0, ignored_extensi
         files: list[Path] = []
         for entry in entries:
             if entry.is_symlink():
-                result.skipped.append((entry, "symlink"))
+                try:
+                    if links is None or entry not in links.destinations:
+                        raise ValueError("symlink")
+                    links.snapshot(entry)
+                    files.append(entry)
+                except (OSError, ValueError) as error:
+                    result.skipped.append((entry, "symlink" if str(error) == "symlink" else f"symlink: {error}"))
             elif entry.is_dir():
                 visit(entry, ignored_tv_context or entry.name.casefold() in ignored_folders)
             elif entry.is_file():
@@ -65,11 +71,14 @@ def scan(root: Path, kind: str, *, minimum_age_seconds: int = 0, ignored_extensi
                 result.skipped.append((path, "temporary extension"))
                 continue
             try:
-                stat = path.stat()
+                if path.is_symlink():
+                    mtime = links.snapshot(path).link.mtime_ns / 1e9
+                else:
+                    mtime = path.stat().st_mtime
             except OSError as error:
                 result.skipped.append((path, f"unreadable: {error}"))
                 continue
-            if now - stat.st_mtime < minimum_age_seconds:
+            if now - mtime < minimum_age_seconds:
                 result.skipped.append((path, "possibly incomplete"))
             else:
                 eligible.append(path)

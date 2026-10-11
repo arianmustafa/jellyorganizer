@@ -19,7 +19,7 @@ from jellyorganize.completion import CompletionTracker
 from jellyorganize.operations import Operations
 from jellyorganize.service import token, install as install_service, units as service_units
 from jellyorganize.filesystem.recovery import recover
-from jellyorganize.filesystem.apply import apply_plan
+from jellyorganize.filesystem.apply import apply_plan, _check_unchanged
 from jellyorganize.filesystem.undo import undo_transaction
 from jellyorganize.identity.store import IdentityStore
 from jellyorganize.metadata.cache import MetadataCache
@@ -28,7 +28,7 @@ from jellyorganize.metadata.tmdb import TMDbProvider
 from jellyorganize.metadata.tvmaze import TVmazeProvider
 from jellyorganize.planning.audit import plan_audit
 from jellyorganize.planning.ingest import plan_ingest
-from jellyorganize.planning.store import PlanStore
+from jellyorganize.planning.store import PlanStore, FileState
 from jellyorganize.models import MediaItem, Proposal
 from jellyorganize.scanner.incoming import scan_incoming
 from jellyorganize.scanner.library import scan_library
@@ -58,7 +58,7 @@ def parser() -> argparse.ArgumentParser:
     ready = commands.add_parser("ready", help="acknowledge a completed file or download folder in Incoming")
     ready.add_argument("path", type=Path)
     commands.add_parser("recover", help="resume interrupted transactions using saved decisions")
-    doctor = commands.add_parser("doctor", help="check root access and actual hard-link support using temporary probes")
+    doctor = commands.add_parser("doctor", help="check root access and configured link support using temporary probes")
     doctor.add_argument("--json", action="store_true")
     for command in ("status", "exceptions"):
         display = commands.add_parser(command, help="show unattended run health" if command == "status" else "show unresolved files without repeated reports")
@@ -67,7 +67,7 @@ def parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--corpus", type=Path, help="custom labeled corpus JSON")
     benchmark.add_argument("--live", action="store_true", help="use live providers instead of frozen snapshots")
     benchmark.add_argument("--output", type=Path, help="save the full machine-readable report")
-    download = commands.add_parser("import-download", help="import a completed torrent; hard-link mode allows continued seeding")
+    download = commands.add_parser("import-download", help="import a completed torrent; link modes allow continued seeding")
     download.add_argument("--torrent", required=True, help="qBittorrent info hash (Qui: {hash})")
     download.add_argument("--dry-run", action="store_true", help="verify client and files and save a handoff plan without changing media")
     download.add_argument("--handoff-only", action="store_true", help="import into Incoming without metadata organization")
@@ -129,14 +129,8 @@ def review_source_current(entry, item: MediaItem) -> bool:
         return False
     try:
         for path, state in expected.items():
-            current = path.lstat()
-            if path.is_symlink() or not path.is_file():
-                return False
-            if (current.st_size, current.st_mtime_ns, current.st_ino, current.st_dev) != (
-                state.size, state.mtime_ns, state.inode, state.device
-            ):
-                return False
-    except OSError:
+            _check_unchanged(FileState(**state.model_dump(), destination=path), entry.source_root)
+    except (OSError, ValueError):
         return False
     return True
 
@@ -145,7 +139,7 @@ def show_plan(plan, verbose: int, *, auto: bool = False) -> int:
     counts = {key: 0 for key in ("CONFIRMED", "REVIEW", "SKIP", "CONFLICT", "ERROR")}
     print(f"Plan: {plan.plan_id}")
     print(f"Workflow: {plan.workflow.upper()}")
-    print(f"Transfer: {plan.transfer_mode.upper()}" + (" (originals retained)" if plan.transfer_mode == "hardlink" else ""))
+    print(f"Transfer: {plan.transfer_mode.upper()}" + (" (originals retained)" if plan.transfer_mode in {"hardlink", "symlink"} else ""))
     for entry in plan.entries:
         counts[entry.status] += 1
         label = "UNKNOWN" if entry.reason.startswith("media type is ambiguous") else entry.kind.upper()
@@ -189,7 +183,7 @@ async def make_plan(config: Config, workflow: str, selection: str, verbose: int,
     if wait_for_completion and workflow == "ingest":
         fast = config.model_copy(deep=True)
         fast.incoming.minimum_age_seconds = 0
-        tracker = CompletionTracker(config.state_dir / "completion.sqlite3")
+        tracker = CompletionTracker(config.state_dir / "completion.sqlite3", config)
         delay = 0
         for kind in kinds(selection):
             for item in scan_incoming(fast, kind).items:
@@ -211,7 +205,7 @@ async def make_plan(config: Config, workflow: str, selection: str, verbose: int,
             scan = (scan_incoming(config, kind, include_unassigned=kind == selected_kinds[0])
                     if workflow == "ingest" else scan_library(config, kind))
             if workflow == "ingest":
-                scan = CompletionTracker(config.state_dir / "completion.sqlite3").filter(scan, config.incoming)
+                scan = CompletionTracker(config.state_dir / "completion.sqlite3", config).filter(scan, config.incoming)
             planner = plan_ingest if workflow == "ingest" else plan_audit
             proposals = await planner(scan, config, tmdb, tvmaze, identities, skip_paths)
             if auto:
@@ -423,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Filesystem mode: {report['mode']}")
             for row in report["checks"]:
                 print(f"[{row['status']}] {row['stage']}: {row['source']} → {row['destination']}")
-                print("  " + (row.get("error") or ("Hard links supported" if row["link_supported"] else
+                supported = "Symbolic links supported" if report["mode"] == "symlink" else "Hard links supported"
+                print("  " + (row.get("error") or (supported if row["link_supported"] else
                                                     "Writable destination; move mode will use verified copying")))
         return 0 if report["passed"] else 4
     if args.command == "config":
@@ -447,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
             problems.append(str(error))
             configured_token = False
         print(f"Configuration: {(args.config or config_path()).expanduser().absolute()}")
-        print(f"Import transfer mode: {config.filesystem.mode}" + (" (originals retained)" if config.filesystem.mode == "hardlink" else ""))
+        print(f"Import transfer mode: {config.filesystem.mode}" + (" (originals retained)" if config.filesystem.mode in {"hardlink", "symlink"} else ""))
         print(f"TMDb credential available: {'yes' if configured_token else 'no (cached lookups only)'}")
         if config.notifications.enabled or config.jellyfin.enabled:
             from jellyorganize.integrations import secret, webhook_url
@@ -563,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Path must identify eligible completed media in Incoming; remove temporary or unassociated files first", file=sys.stderr)
             return 4
         try:
-            tracker = CompletionTracker(config.state_dir / "completion.sqlite3")
+            tracker = CompletionTracker(config.state_dir / "completion.sqlite3", config)
             for item in items:
                 tracker.acknowledge(item)
             print(f"Acknowledged completed files: {len(items)}")

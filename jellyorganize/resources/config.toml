@@ -36,8 +36,9 @@ ignored_tv_directories = ["Featurettes"]
 tvmaze = true
 
 [filesystem]
-# move: relocate files (default); hardlink: retain originals at both import stages.
+# move: relocate files (default); hardlink or symlink: retain originals at both import stages.
 # Hard links require compatible mounts of the same filesystem; there is no copy fallback.
+# Symlinks work across filesystems; originals must remain at their absolute paths and be readable by Jellyfin.
 mode = "move"
 hash_algorithm = "sha256"
 
@@ -49,8 +50,8 @@ credential_file = "~/.local/share/jellyorganize/tmdb.token"
 
 # Optional qBittorrent/Qui handoff. Both paths and the API URL are configurable.
 # Keep this disabled by leaving downloads.path and qbittorrent.url unset.
-# Handoffs require a shared incoming.path. Hardlink mode permits completed seeders;
-# move mode requires stopped torrents. Torrent entries are retained in both modes.
+# Handoffs require a shared incoming.path. Hardlink and symlink modes permit completed seeders;
+# move mode requires stopped torrents. Torrent entries are retained in all modes.
 # [downloads]
 # path = "~/downloads/qbittorrent"
 #

@@ -66,7 +66,17 @@ def parent_fd(root_descriptor: int, relative: Path, *, create: bool = False):
 
 def assert_state(descriptor: int, name: str, expected: FileState) -> os.stat_result:
     current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-    if not stat.S_ISREG(current.st_mode):
+    if expected.link is not None:
+        if not stat.S_ISLNK(current.st_mode) or os.readlink(name, dir_fd=descriptor) != str(expected.link.source):
+            raise UnsafePath(f"changed symbolic link: {expected.source}")
+        retained = expected.link
+        root = root_fd(retained.root)
+        try:
+            with parent_fd(root, relative_file(retained.source, retained.root)) as (parent, target):
+                assert_state(parent, target, FileState(**retained.model_dump(exclude={"root"}), destination=expected.source))
+        finally:
+            os.close(root)
+    elif not stat.S_ISREG(current.st_mode):
         raise UnsafePath(f"not a regular file: {expected.source}")
     if (current.st_size, current.st_mtime_ns, current.st_ino, current.st_dev) != (
         expected.size, expected.mtime_ns, expected.inode, expected.device
